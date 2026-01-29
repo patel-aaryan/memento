@@ -10,4 +10,4 @@ Jan 26 - Feb 1
 
 - Amirdha drafted mockup/flow diagram for the project; [diagram](LINK HERE TO THE MOCKUP DRAWINGS)
 - Helena took meeting minutes and week 4 update
-- Goal/Task: Finish P3 Project Proposal [LINK HERE TO NEW GOOGLE DOC OF FINAL PROPOSAL]
+- Goal/Task: Finish P3 [Project Proposal](https://docs.google.com/document/d/1QZf02Mx0QWz7MK7MTCDP17BlMhBrEn9506kgHkaYWPE/edit?usp=sharing)
