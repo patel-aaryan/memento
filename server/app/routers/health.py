@@ -1,10 +1,10 @@
 from fastapi import APIRouter
-from app.controllers.health_controller import HealthController
+from app.repositories.health_repository import HealthRepository
 
 router = APIRouter(prefix="/health", tags=["health"])
-controller = HealthController()
+repository = HealthRepository()
 
 
 @router.get("")
 async def health_check():
-    return controller.get_health()
+    return repository.ping_database()

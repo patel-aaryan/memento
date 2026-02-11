@@ -7,7 +7,7 @@ settings = get_settings()
 
 app = FastAPI(
     title="Memento API",
-    description="FastAPI server with Supabase backend",
+    description="FastAPI server with Neon database backend",
     version="1.0.0",
     debug=settings.debug,
 )

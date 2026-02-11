@@ -1,11 +1,13 @@
-from app.config.supabase import get_supabase
+from sqlalchemy import text
+from app.config.db import get_db
 
 
 class HealthRepository:
     def __init__(self):
-        self.supabase = get_supabase()
+        self.db = next(get_db())
 
-    def ping_database(self) -> str:
+    def ping_database(self) -> dict:
         """Execute a simple query to verify database connectivity."""
-        response = self.supabase.rpc("heartbeat", {}).execute()
-        return response
+        result = self.db.execute(text("SELECT message FROM health"))
+        row = result.fetchone()
+        return {"message": row[0] if row else "No message found"}

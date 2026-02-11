@@ -3,8 +3,7 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    supabase_url: str
-    supabase_publishable_key: str
+    database_url: str
     debug: bool = False
 
     class Config:
