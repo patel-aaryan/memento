@@ -39,6 +39,11 @@ import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
+import com.example.mementoandroid.ui.album.AlbumScreen
+import com.example.mementoandroid.ui.album.FriendUi
+import com.example.mementoandroid.ui.album.AlbumPhotoUi
+
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,12 +57,48 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+//@Composable
+//fun MementoAndroidApp() {
+//    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+//        HomeScreen(modifier = Modifier.padding(innerPadding))
+//    }
+//}
 @Composable
 fun MementoAndroidApp() {
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        HomeScreen(modifier = Modifier.padding(innerPadding))
+    val demoPhotos = remember {
+        listOf(
+            AlbumPhotoUi("1", R.drawable.photo_1),
+            AlbumPhotoUi("2", R.drawable.photo_2),
+        )
+    }
+
+    val demoFriends = remember {
+        listOf(
+            FriendUi("1", "isla"),
+            FriendUi("2", "blair"),
+            FriendUi("3", "shannon"),
+            FriendUi("4", "nick")
+        )
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize()
+    ) { innerPadding ->
+        AlbumScreen(
+            modifier = Modifier.padding(innerPadding),
+            albumName = "Grad Trip",
+            photos = demoPhotos,
+            friends = demoFriends,
+            onBack = {},
+            onEditAlbumName = {},
+            onDeleteAlbum = {},
+            onAddFriend = {},
+            onPhotoClick = { /* later */ },
+            onAddPhoto = { /* later */ }
+        )
     }
 }
+
 
 data class ListItemData(
     val title: String,
@@ -157,6 +198,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         }
     }
 }
+
 
 @Preview(showBackground = true)
 @Composable
