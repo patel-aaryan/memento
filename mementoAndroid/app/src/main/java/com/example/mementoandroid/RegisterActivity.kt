@@ -20,18 +20,18 @@ import java.net.HttpURLConnection
 import java.net.URL
 import org.json.JSONObject
 
-class LoginActivity : ComponentActivity() {
+class RegisterActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MementoAndroidTheme {
-                LoginScreen(
-                    onLoginSuccess = {
+                RegisterScreen(
+                    onRegisterSuccess = {
                         startActivity(Intent(this, MainActivity::class.java))
                         finish()
                     },
-                    onSignUp = {
-                        startActivity(Intent(this, RegisterActivity::class.java))
+                    onBackToLogin = {
+                        finish()
                     }
                 )
             }
@@ -39,12 +39,9 @@ class LoginActivity : ComponentActivity() {
     }
 }
 
-// Base URL for the backend API.
 // 10.0.2.2 is the emulator's alias for your host machine's localhost.
 private const val BASE_URL = "http://10.0.2.2:8000"
 
-// Performs the login request against the backend API.
-// Returns the access token on success.
 private suspend fun loginToBackend(email: String, password: String): Result<String> {
     return withContext(Dispatchers.IO) {
         try {
@@ -54,29 +51,17 @@ private suspend fun loginToBackend(email: String, password: String): Result<Stri
                 setRequestProperty("Content-Type", "application/json")
                 doOutput = true
             }
-
             val requestBody = JSONObject().apply {
                 put("email", email)
                 put("password", password)
             }.toString()
-
-            connection.outputStream.use { outputStream ->
-                outputStream.write(requestBody.toByteArray())
-            }
-
+            connection.outputStream.use { it.write(requestBody.toByteArray()) }
             val responseCode = connection.responseCode
-            val stream = if (responseCode in 200..299) {
-                connection.inputStream
-            } else {
-                connection.errorStream
-            }
-
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
             val responseBody = stream.bufferedReader().use { it.readText() }
-
             if (responseCode in 200..299) {
                 val json = JSONObject(responseBody)
-                val accessToken = json.getString("access_token")
-                Result.success(accessToken)
+                Result.success(json.getString("access_token"))
             } else {
                 val message = try {
                     JSONObject(responseBody).optString("detail", "Login failed")
@@ -91,20 +76,57 @@ private suspend fun loginToBackend(email: String, password: String): Result<Stri
     }
 }
 
+private suspend fun registerToBackend(name: String, email: String, password: String): Result<Unit> {
+    return withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$BASE_URL/auth/register")
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json")
+                doOutput = true
+            }
+
+            val requestBody = JSONObject().apply {
+                put("name", name)
+                put("email", email)
+                put("password", password)
+            }.toString()
+
+            connection.outputStream.use { it.write(requestBody.toByteArray()) }
+
+            val responseCode = connection.responseCode
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+            val responseBody = stream.bufferedReader().use { it.readText() }
+
+            if (responseCode in 200..299) {
+                Result.success(Unit)
+            } else {
+                val message = try {
+                    JSONObject(responseBody).optString("detail", "Registration failed")
+                } catch (e: Exception) {
+                    "Registration failed (HTTP $responseCode)"
+                }
+                Result.failure(Exception(message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+
 @Composable
-fun LoginScreen(
-    onLoginSuccess: () -> Unit,
-    onSignUp: () -> Unit = {}
+fun RegisterScreen(
+    onRegisterSuccess: () -> Unit,
+    onBackToLogin: () -> Unit
 ) {
+    var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
 
-    Surface(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    Surface(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -113,11 +135,21 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Memento",
+                text = "Sign up",
                 style = MaterialTheme.typography.headlineLarge
             )
 
             Spacer(modifier = Modifier.height(32.dp))
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = email,
@@ -142,21 +174,22 @@ fun LoginScreen(
 
             Button(
                 onClick = {
-                    if (email.isBlank() || password.isBlank() || isLoading) {
-                        return@Button
-                    }
+                    if (name.isBlank() || email.isBlank() || password.isBlank() || isLoading) return@Button
                     errorMessage = null
                     isLoading = true
                     coroutineScope.launch {
-                        val result = loginToBackend(email.trim(), password)
-                        isLoading = false
-                        result
-                            .onSuccess { accessToken ->
-                                // TODO: persist access token (e.g., DataStore / SharedPreferences)
-                                onLoginSuccess()
+                        val registerResult = registerToBackend(name.trim(), email.trim(), password)
+                        registerResult
+                            .onSuccess {
+                                val loginResult = loginToBackend(email.trim(), password)
+                                isLoading = false
+                                loginResult
+                                    .onSuccess { onRegisterSuccess() }
+                                    .onFailure { errorMessage = it.message ?: "Account created. Please log in." }
                             }
-                            .onFailure { error ->
-                                errorMessage = error.message ?: "Login failed"
+                            .onFailure {
+                                isLoading = false
+                                errorMessage = it.message ?: "Registration failed"
                             }
                     }
                 },
@@ -170,7 +203,7 @@ fun LoginScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 } else {
-                    Text("Login")
+                    Text("Register")
                 }
             }
 
@@ -185,8 +218,8 @@ fun LoginScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            TextButton(onClick = onSignUp) {
-                Text("Sign up")
+            TextButton(onClick = onBackToLogin) {
+                Text("Back to login")
             }
         }
     }

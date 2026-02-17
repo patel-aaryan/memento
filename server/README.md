@@ -39,8 +39,9 @@ FastAPI server with Supabase backend.
 
 5. **Run the server**
    ```bash
-   uvicorn app.main:app --reload
+   uvicorn app.main:app --reload --host 0.0.0.0
    ```
+   Use `--host 0.0.0.0` so the Android emulator (or device on your network) can reach the API.
 
 ## URLs
 

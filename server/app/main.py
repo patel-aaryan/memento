@@ -17,7 +17,7 @@ def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
     from fastapi.openapi.utils import get_openapi
-    
+
     openapi_schema = get_openapi(
         title=app.title,
         version=app.version,
@@ -32,7 +32,7 @@ def custom_openapi():
             "bearerFormat": "JWT",
         }
     }
-    
+
     # Add security requirement to all protected endpoints
     if "paths" in openapi_schema:
         # List of paths that require authentication (exact matches and patterns)
@@ -43,23 +43,23 @@ def custom_openapi():
             "/audio",
             "/upload",
         ]
-        
+
         for path, methods in openapi_schema["paths"].items():
             # Check if path should be protected
             is_protected = False
-            
+
             # Check exact match or if path starts with any protected pattern
             for pattern in protected_path_patterns:
                 if path == pattern or path.startswith(pattern + "/"):
                     is_protected = True
                     break
-            
+
             if is_protected:
                 # Add security to all HTTP methods for this path
                 for method in ["get", "post", "put", "delete", "patch"]:
                     if method in methods:
                         methods[method]["security"] = [{"bearerAuth": []}]
-    
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
