@@ -8,4 +8,4 @@ Memento is a mobile application that allows users to upload, store, and revisit 
   - [Meeting Minutes](weekly-updates/meeting-minutes)
   - [Weekly Updates](weekly-updates)
  
-  - test
+
