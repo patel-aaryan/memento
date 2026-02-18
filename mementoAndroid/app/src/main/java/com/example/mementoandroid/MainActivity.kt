@@ -1,5 +1,6 @@
 package com.example.mementoandroid
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.filled.FamilyRestroom
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
@@ -51,7 +53,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MementoAndroidTheme {
-                MementoAndroidApp()
+//                MementoAndroidApp()
+                HomeScreen(
+                    onProfileClick = {
+                        startActivity(
+                            Intent(this, ProfileActivity::class.java)
+                        )
+                    }
+                )
             }
         }
     }
@@ -107,7 +116,7 @@ data class ListItemData(
 )
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(modifier: Modifier = Modifier, onProfileClick: () -> Unit) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val sampleItems = remember {
         listOf(
@@ -138,7 +147,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FloatingActionButton(
-                onClick = { /* profile */ },
+                onClick = {onProfileClick()},
                 modifier = Modifier.size(48.dp),
                 content = {
                     Icon(
@@ -204,6 +213,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 @Composable
 fun HomeScreenPreview() {
     MementoAndroidTheme {
-        HomeScreen()
+        HomeScreen(
+            onProfileClick = {}
+        )
     }
 }
