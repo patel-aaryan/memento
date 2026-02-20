@@ -12,17 +12,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
-import kotlinx.coroutines.Dispatchers
+import com.example.mementoandroid.util.AuthTokenStore
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 import org.json.JSONObject
 
 class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AuthTokenStore.init(applicationContext)
+        if (AuthTokenStore.get() != null) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+            return
+        }
         setContent {
             MementoAndroidTheme {
                 LoginScreen(
@@ -39,56 +43,16 @@ class LoginActivity : ComponentActivity() {
     }
 }
 
-// Base URL for the backend API.
-// 10.0.2.2 is the emulator's alias for your host machine's localhost.
-private const val BASE_URL = "http://10.0.2.2:8000"
-
-// Performs the login request against the backend API.
-// Returns the access token on success.
 private suspend fun loginToBackend(email: String, password: String): Result<String> {
-    return withContext(Dispatchers.IO) {
-        try {
-            val url = URL("$BASE_URL/auth/login")
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-            }
-
-            val requestBody = JSONObject().apply {
-                put("email", email)
-                put("password", password)
-            }.toString()
-
-            connection.outputStream.use { outputStream ->
-                outputStream.write(requestBody.toByteArray())
-            }
-
-            val responseCode = connection.responseCode
-            val stream = if (responseCode in 200..299) {
-                connection.inputStream
-            } else {
-                connection.errorStream
-            }
-
-            val responseBody = stream.bufferedReader().use { it.readText() }
-
-            if (responseCode in 200..299) {
-                val json = JSONObject(responseBody)
-                val accessToken = json.getString("access_token")
-                Result.success(accessToken)
-            } else {
-                val message = try {
-                    JSONObject(responseBody).optString("detail", "Login failed")
-                } catch (e: Exception) {
-                    "Login failed (HTTP $responseCode)"
-                }
-                Result.failure(Exception(message))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    val body = JSONObject().apply {
+        put("email", email)
+        put("password", password)
     }
+    return BackendClient.post(
+        "/auth/login",
+        body,
+        errorMessageFallback = { "Login failed (HTTP $it)" }
+    ).map { it.getString("access_token") }
 }
 
 @Composable
@@ -152,7 +116,7 @@ fun LoginScreen(
                         isLoading = false
                         result
                             .onSuccess { accessToken ->
-                                // TODO: persist access token (e.g., DataStore / SharedPreferences)
+                                AuthTokenStore.save(accessToken)
                                 onLoginSuccess()
                             }
                             .onFailure { error ->

@@ -83,9 +83,10 @@ def update_image(
     caption: Optional[str] = None,
     image_url: Optional[str] = None,
     latitude: Optional[float] = None,
-    longitude: Optional[float] = None
+    longitude: Optional[float] = None,
+    **kwargs  # ignore any extra keys from model_dump()
 ) -> Optional[dict]:
-    """Update an image."""
+    """Update an image. Only include fields that are not None."""
     # Build dynamic update query
     updates = []
     params = {"image_id": image_id}
@@ -107,8 +108,10 @@ def update_image(
         params["longitude"] = longitude
     
     if not updates:
-        # No updates to make, just return the existing image
         return get_image_by_id(db, image_id)
+    
+    # Explicitly set updated_at so the row is touched and trigger runs
+    updates.append("updated_at = CURRENT_TIMESTAMP")
     
     query = text(f"""
         UPDATE images
@@ -118,10 +121,11 @@ def update_image(
     """)
     
     try:
+        print(f"[image_repository] UPDATE images SET {', '.join(updates)} WHERE id=:image_id params={params}", flush=True)
         result = db.execute(query, params)
-        db.commit()
         row = result.fetchone()
-        
+        db.commit()
+        print(f"[image_repository] UPDATE rowcount={result.rowcount} returned_caption={row[2] if row else None!r}", flush=True)
         if row:
             return {
                 "id": row[0],

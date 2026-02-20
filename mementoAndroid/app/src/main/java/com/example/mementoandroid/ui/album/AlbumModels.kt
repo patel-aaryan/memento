@@ -5,12 +5,21 @@ import android.net.Uri
 data class AlbumPhotoUi(
     val id: String,
     val imageRes: Int? = null,
-    val uri: Uri? = null
+    val uri: Uri? = null,
+    val imageUrl: String? = null,
+    val caption: String? = null
 ) {
     init {
-        require(imageRes != null || uri != null) { "Either imageRes or uri must be set" }
+        require(listOf(imageRes, uri, imageUrl).any { it != null }) {
+            "One of imageRes, uri, or imageUrl must be set"
+        }
     }
 }
+
+data class AlbumUi(
+    val id: Int,
+    val name: String
+)
 
 data class FriendUi(
     val id: String,

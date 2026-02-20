@@ -50,7 +50,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -74,11 +76,13 @@ fun PhotoDetailScreen(
     albumName: String,
     mock: PhotoDetailMock,
     onBack: () -> Unit,
+    onSave: (caption: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var notesText by remember(photo.id) { mutableStateOf(mock.caption) }
+    val focusManager = LocalFocusManager.current
+    var notesText by remember(photo.id) { mutableStateOf(photo.caption?.takeIf { it.isNotBlank() } ?: mock.caption) }
     var displayedDateTime by remember(photo.id) { mutableStateOf(mock.dateTime) }
     var displayedLocation by remember(photo.id) { mutableStateOf(mock.location) }
     var recordedAudioPath by remember(photo.id) { mutableStateOf<String?>(null) }
@@ -122,11 +126,11 @@ fun PhotoDetailScreen(
         }
     }
 
-    LaunchedEffect(photo.id, photo.uri) {
+    LaunchedEffect(photo.id, photo.uri, photo.imageUrl) {
         displayedDateTime = mock.dateTime
         displayedLocation = mock.location
         val uri = photo.uri
-        if (uri != null) {
+        if (uri != null && photo.imageUrl == null) {
             val md = withContext(Dispatchers.IO) { extractPhotoMetadata(context, uri) }
             md?.let {
                 formatPhotoMetadataDateTime(it.dateTimeOriginal ?: it.dateTaken)?.let { displayedDateTime = it }
@@ -170,8 +174,16 @@ fun PhotoDetailScreen(
                     .fillMaxWidth()
                     .height(320.dp)
             ) {
-                if (photo.uri != null) {
-                    AsyncImage(
+                when {
+                    photo.imageUrl != null -> AsyncImage(
+                        model = photo.imageUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp)
+                    )
+                    photo.uri != null -> AsyncImage(
                         model = photo.uri,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
@@ -179,8 +191,7 @@ fun PhotoDetailScreen(
                             .fillMaxWidth()
                             .height(320.dp)
                     )
-                } else {
-                    Image(
+                    else -> Image(
                         painter = painterResource(id = photo.imageRes!!),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
@@ -373,8 +384,11 @@ fun PhotoDetailScreen(
                 )
                 Button(
                     onClick = {
-                        Toast.makeText(context, "Notes saved", Toast.LENGTH_SHORT).show()
-                        // Persistence can be wired here later (e.g. save notesText for this photo)
+                        focusManager.clearFocus()
+                        scope.launch {
+                            delay(150)
+                            withContext(Dispatchers.Main) { onSave(notesText) }
+                        }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {

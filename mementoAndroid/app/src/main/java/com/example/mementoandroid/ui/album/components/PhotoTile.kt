@@ -26,15 +26,20 @@ fun PhotoTile(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
     ) {
-        if (photo.uri != null) {
-            AsyncImage(
+        when {
+            photo.imageUrl != null -> AsyncImage(
+                model = photo.imageUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            photo.uri != null -> AsyncImage(
                 model = photo.uri,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
-            Image(
+            else -> Image(
                 painter = painterResource(id = photo.imageRes!!),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,

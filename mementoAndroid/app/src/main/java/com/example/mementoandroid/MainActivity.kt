@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -50,37 +51,52 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import java.io.File
 import java.util.UUID
+import com.example.mementoandroid.api.BackendClient
+import com.example.mementoandroid.api.BackendException
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.album.AlbumScreen
+import com.example.mementoandroid.ui.album.AlbumUi
 import com.example.mementoandroid.ui.album.FriendUi
 import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
+import org.json.JSONObject
+import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
+import android.util.Log
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 
 
+private const val TAG = "MainActivity"
+
+private fun handle401(context: ComponentActivity, e: Throwable) {
+    if (e is BackendException && e.statusCode == 401) {
+        AuthTokenStore.clear()
+        context.startActivity(Intent(context, LoginActivity::class.java))
+        context.finish()
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AuthTokenStore.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             MementoAndroidTheme {
                 val context = LocalContext.current as ComponentActivity
-                var selectedAlbumTitle by rememberSaveable { mutableStateOf<String?>(null) }
+                var selectedAlbumId by rememberSaveable { mutableStateOf<Int?>(null) }
                 var selectedPhotoId by rememberSaveable { mutableStateOf<String?>(null) }
-                val photos = remember {
-                    mutableStateListOf(
-                        AlbumPhotoUi("1", imageRes = R.drawable.photo_1),
-                        AlbumPhotoUi("2", imageRes = R.drawable.photo_2),
-                    )
-                }
+                var albums by remember { mutableStateOf<List<AlbumUi>>(emptyList()) }
+                val photos = remember { mutableStateListOf<AlbumPhotoUi>() }
                 val demoFriends = remember {
                     listOf(
                         FriendUi("1", "isla"),
@@ -89,34 +105,136 @@ class MainActivity : ComponentActivity() {
                         FriendUi("4", "nick")
                     )
                 }
-                val personalAlbums = setOf(
-                    "Sweet Dreams Bubble Tea",
-                    "Ken's Sushi",
-                    "2nd Anniversary"
-                )
                 var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+                var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+
+                val scope = rememberCoroutineScope()
+
+                LaunchedEffect(Unit) {
+                    val t = AuthTokenStore.get() ?: return@LaunchedEffect
+                    BackendClient.getArray("/albums", t)
+                        .onSuccess { arr ->
+                            val list = (0 until arr.length()).map { i ->
+                                val o = arr.getJSONObject(i)
+                                AlbumUi(o.getInt("id"), o.getString("name"))
+                            }
+                            withContext(Dispatchers.Main) { albums = list }
+                        }
+                        .onFailure { handle401(context, it) }
+                }
+
+                LaunchedEffect(selectedAlbumId) {
+                    if (selectedAlbumId == null) return@LaunchedEffect
+                    val t = AuthTokenStore.get() ?: return@LaunchedEffect
+                    BackendClient.getArray("/images/album/$selectedAlbumId", t).onSuccess { arr ->
+                        val list = (0 until arr.length()).map { i ->
+                                val o = arr.getJSONObject(i)
+                                AlbumPhotoUi(
+                                    id = o.getInt("id").toString(),
+                                    imageUrl = o.getString("image_url"),
+                                    caption = o.optString("caption", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                        withContext(Dispatchers.Main) {
+                            photos.clear()
+                            photos.addAll(list)
+                        }
+                    }.onFailure { e ->
+                        withContext(Dispatchers.Main) {
+                            handle401(context, e)
+                            photos.clear()
+                        }
+                    }
+                }
+
+                fun loadAlbumImages() {
+                    val aid = selectedAlbumId ?: return
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.getArray("/images/album/$aid", t)
+                            .onSuccess { arr ->
+                                val list = (0 until arr.length()).map { i ->
+                                    val o = arr.getJSONObject(i)
+                                    AlbumPhotoUi(
+                                        id = o.getInt("id").toString(),
+                                        imageUrl = o.getString("image_url"),
+                                        caption = o.optString("caption", "").takeIf { it.isNotBlank() }
+                                    )
+                                }
+                                withContext(Dispatchers.Main) {
+                                    photos.clear()
+                                    photos.addAll(list)
+                                }
+                            }
+                            .onFailure { e -> withContext(Dispatchers.Main) { handle401(context, e) } }
+                    }
+                }
+
+                fun addPhotoWithUpload(
+                    photoFile: File,
+                    fallbackUri: Uri?,
+                    albumId: Int,
+                    latitude: Double?,
+                    longitude: Double?
+                ) {
+                    val t = AuthTokenStore.get()
+                    if (t == null) {
+                        Log.w(TAG, "Upload skipped: no auth token. Add photo from Login first.")
+                        return
+                    }
+                    scope.launch {
+                        val url = CloudinaryHelper.uploadImage(context, photoFile, t)
+                        withContext(Dispatchers.Main) {
+                            if (url == null) return@withContext
+                        }
+                        val body = JSONObject().apply {
+                            put("album_id", albumId)
+                            put("image_url", url)
+                            if (latitude != null) put("latitude", latitude)
+                            if (longitude != null) put("longitude", longitude)
+                        }
+                        BackendClient.post("/images", body, token = t)
+                            .onSuccess { loadAlbumImages() }
+                            .onFailure { e -> withContext(Dispatchers.Main) { handle401(context, e) } }
+                    }
+                }
 
                 val takePictureLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.TakePicture()
                 ) { success ->
-                    if (success && pendingCameraUri != null) {
-                        photos.add(AlbumPhotoUi(UUID.randomUUID().toString(), uri = pendingCameraUri))
+                    if (success) {
+                        val file = pendingCameraFile
+                        val uri = pendingCameraUri
+                        val albumId = selectedAlbumId
+                        pendingCameraFile = null
                         pendingCameraUri = null
+                        if (file != null && file.exists() && albumId != null) {
+                            addPhotoWithUpload(file, uri, albumId, null, null)
+                        }
                     }
                 }
 
-                val scope = rememberCoroutineScope()
                 val pickPhotoLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument()
                 ) { uri: Uri? ->
                     if (uri != null) {
+                        val albumId = selectedAlbumId
                         scope.launch(Dispatchers.IO) {
                             verifyAndLogLocationStrippingCause(uri)
-                            extractPhotoMetadata(context, uri)?.let { metadata ->
-                                logPhotoMetadata(metadata)
+                            val metadata = extractPhotoMetadata(context, uri)
+                            metadata?.let { logPhotoMetadata(it) }
+                            val file = File(context.cacheDir, "upload_${System.currentTimeMillis()}.jpg")
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                file.outputStream().use { input.copyTo(it) }
                             }
-                            withContext(Dispatchers.Main) {
-                                photos.add(AlbumPhotoUi(UUID.randomUUID().toString(), uri = uri))
+                            if (file.exists() && albumId != null) {
+                                addPhotoWithUpload(
+                                    file,
+                                    uri,
+                                    albumId,
+                                    metadata?.latitude,
+                                    metadata?.longitude
+                                )
                             }
                         }
                     }
@@ -126,6 +244,7 @@ class MainActivity : ComponentActivity() {
                     when (source) {
                         AddPhotoSource.Camera -> {
                             val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+                            pendingCameraFile = file
                             pendingCameraUri = FileProvider.getUriForFile(
                                 context,
                                 "${context.packageName}.fileprovider",
@@ -139,31 +258,48 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.name }
+
                 when {
-                    selectedAlbumTitle != null && selectedPhotoId != null -> {
+                    selectedAlbumId != null && selectedPhotoId != null -> {
                         BackHandler { selectedPhotoId = null }
-                        val albumName = selectedAlbumTitle!!
+                        val albumName = selectedAlbumName ?: ""
                         val photo = photos.find { it.id == selectedPhotoId }
                         if (photo != null) {
                             PhotoDetailScreen(
                                 photo = photo,
                                 albumName = albumName,
                                 mock = getPhotoDetailMock(albumName, photo.id),
-                                onBack = { selectedPhotoId = null }
+                                onBack = { selectedPhotoId = null },
+                                onSave = { caption ->
+                                    scope.launch {
+                                        val t = AuthTokenStore.get() ?: return@launch
+                                        val body = JSONObject().put("caption", caption)
+                                        val result = BackendClient.put("/images/${photo.id}", body, token = t)
+                                        withContext(Dispatchers.Main) {
+                                            result.onFailure { handle401(context, it) }
+                                            if (result.isSuccess) loadAlbumImages()
+                                            Toast.makeText(
+                                                context,
+                                                if (result.isSuccess) "Notes saved" else result.exceptionOrNull()?.message ?: "Failed to save",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                }
                             )
                         } else {
                             selectedPhotoId = null
                         }
                     }
-                    selectedAlbumTitle != null -> {
-                        val albumName = selectedAlbumTitle!!
+                    selectedAlbumId != null -> {
                         AlbumScreen(
                             modifier = Modifier.fillMaxSize(),
-                            albumName = albumName,
+                            albumName = selectedAlbumName ?: "",
                             photos = photos,
                             friends = demoFriends,
-                            isSharedAlbum = albumName !in personalAlbums,
-                            onBack = { selectedAlbumTitle = null },
+                            isSharedAlbum = false,
+                            onBack = { selectedAlbumId = null },
                             onEditAlbumName = {},
                             onDeleteAlbum = {},
                             onAddFriend = {},
@@ -173,10 +309,11 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {
                         HomeScreen(
+                            albums = albums,
                             onProfileClick = {
                                 startActivity(Intent(context, ProfileActivity::class.java))
                             },
-                            onAlbumClick = { selectedAlbumTitle = it }
+                            onAlbumClick = { selectedAlbumId = it }
                         )
                     }
                 }
@@ -186,37 +323,17 @@ class MainActivity : ComponentActivity() {
 }
 
 
-data class ListItemData(
-    val title: String,
-    val detail: String,
-    val icon: ImageVector,
-)
-
 @Composable
 fun HomeScreen(
+    albums: List<AlbumUi>,
     modifier: Modifier = Modifier,
     onProfileClick: () -> Unit,
-    onAlbumClick: (String) -> Unit = {}
+    onAlbumClick: (Int) -> Unit = {}
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    val sampleItems = remember {
-        listOf(
-            ListItemData("Sweet Dreams Bubble Tea", "Jan 2025", Icons.Default.Person),
-            ListItemData("Grad Trip", "May 2025", Icons.Default.Group),
-            ListItemData("Ken's Sushi", "Feb 2025", Icons.Default.Person),
-            ListItemData("Square One Shopping", "Feb 2025", Icons.Default.Group),
-            ListItemData("Niagara Falls Adventure", "Feb 2025", Icons.Default.Group),
-            ListItemData("Cancun Fam Trip", "Dec 2024", Icons.Default.FamilyRestroom),
-            ListItemData("2nd Anniversary", "Oct 2025", Icons.Default.Favorite),
-            ListItemData("Sister's Euro Trip", "Feb 2024", Icons.Default.Group),
-        )
-    }
-    val filteredItems = remember(searchQuery, sampleItems) {
-        if (searchQuery.isBlank()) sampleItems
-        else sampleItems.filter {
-            it.title.contains(searchQuery, ignoreCase = true) ||
-                it.detail.contains(searchQuery, ignoreCase = true)
-        }
+    val filteredItems = remember(searchQuery, albums) {
+        if (searchQuery.isBlank()) albums
+        else albums.filter { it.name.contains(searchQuery, ignoreCase = true) }
     }
 
     Column(modifier = modifier.fillMaxSize().statusBarsPadding()) {
@@ -270,19 +387,19 @@ fun HomeScreen(
         ) {
             items(
                 items = filteredItems,
-                key = { it.title },
+                key = { it.id },
             ) { item ->
                 ListItem(
-                    modifier = Modifier.clickable { onAlbumClick(item.title) },
+                    modifier = Modifier.clickable { onAlbumClick(item.id) },
                     leadingContent = {
                         Icon(
-                            imageVector = item.icon,
+                            imageVector = Icons.Default.Favorite,
                             contentDescription = null,
                             modifier = Modifier.size(24.dp),
                         )
                     },
-                    headlineContent = { Text(item.title) },
-                    supportingContent = { Text(item.detail) },
+                    headlineContent = { Text(item.name) },
+                    supportingContent = { Text("") },
                 )
                 HorizontalDivider()
             }
@@ -296,6 +413,7 @@ fun HomeScreen(
 fun HomeScreenPreview() {
     MementoAndroidTheme {
         HomeScreen(
+            albums = emptyList(),
             onProfileClick = {}
         )
     }

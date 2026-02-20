@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Security
 from sqlalchemy.orm import Session
 from typing import List
@@ -6,6 +7,7 @@ from app.dependencies.auth import get_current_user, security
 from app.schemas.image import ImageCreate, ImageUpdate, ImageResponse
 from app.services import image_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/images", tags=["Images"])
 
 
@@ -37,6 +39,8 @@ async def update_image(
     db: Session = Depends(get_db)
 ):
     """Update an image. Only the creator can update."""
+    body = image_data.model_dump()
+    print(f"[images] PUT /images/{image_id} body={body}", flush=True)
     return image_service.update_image(db, image_id, image_data, current_user["id"])
 
 
@@ -58,5 +62,9 @@ async def get_album_images(
     db: Session = Depends(get_db)
 ):
     """Get all images in an album. User must have access to the album."""
-    return image_service.get_album_images(db, album_id, current_user["id"])
+    images = image_service.get_album_images(db, album_id, current_user["id"])
+    # Debug: print what we're returning so you can confirm caption in DB/response
+    for img in images:
+        print(f"[images] GET /images/album/{album_id} id={img.id} caption={img.caption!r}", flush=True)
+    return images
 

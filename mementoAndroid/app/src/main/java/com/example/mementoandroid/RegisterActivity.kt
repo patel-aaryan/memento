@@ -12,17 +12,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
-import kotlinx.coroutines.Dispatchers
+import com.example.mementoandroid.util.AuthTokenStore
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 import org.json.JSONObject
 
 class RegisterActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AuthTokenStore.init(applicationContext)
         setContent {
             MementoAndroidTheme {
                 RegisterScreen(
@@ -39,79 +38,29 @@ class RegisterActivity : ComponentActivity() {
     }
 }
 
-// 10.0.2.2 is the emulator's alias for your host machine's localhost.
-private const val BASE_URL = "http://10.0.2.2:8000"
-
 private suspend fun loginToBackend(email: String, password: String): Result<String> {
-    return withContext(Dispatchers.IO) {
-        try {
-            val url = URL("$BASE_URL/auth/login")
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-            }
-            val requestBody = JSONObject().apply {
-                put("email", email)
-                put("password", password)
-            }.toString()
-            connection.outputStream.use { it.write(requestBody.toByteArray()) }
-            val responseCode = connection.responseCode
-            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
-            val responseBody = stream.bufferedReader().use { it.readText() }
-            if (responseCode in 200..299) {
-                val json = JSONObject(responseBody)
-                Result.success(json.getString("access_token"))
-            } else {
-                val message = try {
-                    JSONObject(responseBody).optString("detail", "Login failed")
-                } catch (e: Exception) {
-                    "Login failed (HTTP $responseCode)"
-                }
-                Result.failure(Exception(message))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    val body = JSONObject().apply {
+        put("email", email)
+        put("password", password)
     }
+    return BackendClient.post(
+        "/auth/login",
+        body,
+        errorMessageFallback = { "Login failed (HTTP $it)" }
+    ).map { it.getString("access_token") }
 }
 
 private suspend fun registerToBackend(name: String, email: String, password: String): Result<Unit> {
-    return withContext(Dispatchers.IO) {
-        try {
-            val url = URL("$BASE_URL/auth/register")
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-            }
-
-            val requestBody = JSONObject().apply {
-                put("name", name)
-                put("email", email)
-                put("password", password)
-            }.toString()
-
-            connection.outputStream.use { it.write(requestBody.toByteArray()) }
-
-            val responseCode = connection.responseCode
-            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
-            val responseBody = stream.bufferedReader().use { it.readText() }
-
-            if (responseCode in 200..299) {
-                Result.success(Unit)
-            } else {
-                val message = try {
-                    JSONObject(responseBody).optString("detail", "Registration failed")
-                } catch (e: Exception) {
-                    "Registration failed (HTTP $responseCode)"
-                }
-                Result.failure(Exception(message))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    val body = JSONObject().apply {
+        put("name", name)
+        put("email", email)
+        put("password", password)
     }
+    return BackendClient.post(
+        "/auth/register",
+        body,
+        errorMessageFallback = { "Registration failed (HTTP $it)" }
+    ).map { }
 }
 
 @Composable
@@ -184,7 +133,10 @@ fun RegisterScreen(
                                 val loginResult = loginToBackend(email.trim(), password)
                                 isLoading = false
                                 loginResult
-                                    .onSuccess { onRegisterSuccess() }
+                                    .onSuccess { accessToken ->
+                                        AuthTokenStore.save(accessToken)
+                                        onRegisterSuccess()
+                                    }
                                     .onFailure { errorMessage = it.message ?: "Account created. Please log in." }
                             }
                             .onFailure {
