@@ -15,6 +15,7 @@ fun AlbumScreen(
     albumName: String,
     photos: List<AlbumPhotoUi>,
     friends: List<FriendUi>,
+    isSharedAlbum: Boolean,
     onBack: () -> Unit,
     onEditAlbumName: () -> Unit,
     onDeleteAlbum: () -> Unit,
@@ -47,11 +48,12 @@ fun AlbumScreen(
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
-
-            FriendsRow(
-                friends = friends,
-                onAddFriend = onAddFriend
-            )
+            if (isSharedAlbum) {
+                FriendsRow(
+                    friends = friends,
+                    onAddFriend = onAddFriend
+                )
+            }
 
             PhotoGrid(
                 photos = photos,

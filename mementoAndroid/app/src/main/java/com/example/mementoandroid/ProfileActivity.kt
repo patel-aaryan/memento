@@ -13,6 +13,13 @@ import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.border
@@ -41,15 +49,17 @@ class ProfileActivity: ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MementoAndroidTheme {
-                ProfileScreen()
+                ProfileScreen(onBack = { finish() })
             }
         }
 
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
+    onBack: () -> Unit = {},
     profileEmail: String = "bchilling@gmail.com",
     defaultImage: Int = R.drawable.photo_1
 ) {
@@ -79,12 +89,25 @@ fun ProfileScreen(
 
     )
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Profile") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
         // Profile picture
         Image(
             painter = painterResource(id = selectedImage),
@@ -159,6 +182,7 @@ fun ProfileScreen(
                     onCheckedChange = { darkModeEnabled = it }
                 )
             }
+        }
         }
     }
     // Edit profile image Dialog
