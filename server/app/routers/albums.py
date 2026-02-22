@@ -4,6 +4,7 @@ from typing import List
 from app.config.db import get_db
 from app.dependencies.auth import get_current_user, security
 from app.schemas.album import AlbumCreate, AlbumUpdate, AlbumResponse, AlbumMemberAdd, AlbumMemberResponse
+from app.schemas.auth import UserResponse
 from app.services import album_service
 
 router = APIRouter(prefix="/albums", tags=["Albums"])
@@ -36,6 +37,16 @@ async def get_album(
 ):
     """Get an album by ID. User must be owner or member."""
     return album_service.get_album(db, album_id, current_user["id"])
+
+
+@router.get("/{album_id}/members", response_model=List[UserResponse], dependencies=[Security(security)])
+async def get_album_members(
+    album_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all members of an album as full user objects. Caller must be owner or member."""
+    return album_service.get_album_members(db, album_id, current_user["id"])
 
 
 @router.put("/{album_id}", response_model=AlbumResponse, dependencies=[Security(security)])
