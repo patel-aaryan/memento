@@ -128,13 +128,17 @@ class MainActivity : ComponentActivity() {
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
                     BackendClient.getArray("/images/album/$selectedAlbumId", t).onSuccess { arr ->
                         val list = (0 until arr.length()).map { i ->
-                                val o = arr.getJSONObject(i)
-                                AlbumPhotoUi(
-                                    id = o.getInt("id").toString(),
-                                    imageUrl = o.getString("image_url"),
-                                    caption = o.optString("caption", "").takeIf { it.isNotBlank() }
-                                )
-                            }
+                            val o = arr.getJSONObject(i)
+                            val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
+                            val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
+                            AlbumPhotoUi(
+                                id = o.getInt("id").toString(),
+                                imageUrl = o.getString("image_url"),
+                                caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                latitude = lat,
+                                longitude = lon,
+                            )
+                        }
                         withContext(Dispatchers.Main) {
                             photos.clear()
                             photos.addAll(list)
@@ -155,10 +159,14 @@ class MainActivity : ComponentActivity() {
                             .onSuccess { arr ->
                                 val list = (0 until arr.length()).map { i ->
                                     val o = arr.getJSONObject(i)
+                                    val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
+                                    val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
                                     AlbumPhotoUi(
                                         id = o.getInt("id").toString(),
                                         imageUrl = o.getString("image_url"),
-                                        caption = o.optString("caption", "").takeIf { it.isNotBlank() }
+                                        caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                        latitude = lat,
+                                        longitude = lon,
                                     )
                                 }
                                 withContext(Dispatchers.Main) {

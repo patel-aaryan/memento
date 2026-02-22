@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
-from app.routers import health, auth, albums, images, audio, upload
+from app.routers import health, auth, albums, images, audio, upload, location
 
 settings = get_settings()
 
@@ -82,6 +82,7 @@ app.include_router(albums.router)
 app.include_router(images.router)
 app.include_router(audio.router)
 app.include_router(upload.router)
+app.include_router(location.router)
 
 
 @app.get("/")

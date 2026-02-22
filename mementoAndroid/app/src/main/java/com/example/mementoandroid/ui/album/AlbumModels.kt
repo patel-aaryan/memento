@@ -7,7 +7,9 @@ data class AlbumPhotoUi(
     val imageRes: Int? = null,
     val uri: Uri? = null,
     val imageUrl: String? = null,
-    val caption: String? = null
+    val caption: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
 ) {
     init {
         require(listOf(imageRes, uri, imageUrl).any { it != null }) {
