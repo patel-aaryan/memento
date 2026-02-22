@@ -1,6 +1,6 @@
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from app.utils.auth import get_password_hash
 
 
@@ -77,3 +77,19 @@ def get_user_by_id(db: Session, user_id: int) -> Optional[dict]:
             "created_at": str(row[3])
         }
     return None
+
+
+def get_users_by_ids(db: Session, user_ids: List[int]) -> List[dict]:
+    """Get multiple users by IDs. Returns list of user dicts (id, email, name, created_at)."""
+    if not user_ids:
+        return []
+    query = text("""
+        SELECT id, email, name, created_at
+        FROM users
+        WHERE id = ANY(:user_ids)
+    """)
+    result = db.execute(query, {"user_ids": user_ids})
+    return [
+        {"id": row[0], "email": row[1], "name": row[2], "created_at": str(row[3])}
+        for row in result
+    ]
