@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Security
 from sqlalchemy.orm import Session
 from app.config.db import get_db
-from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse
+from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse, UserUpdate
 from app.repositories.user_repository import create_user, get_user_by_email
 from app.utils.auth import verify_password, create_access_token
 from app.dependencies.auth import get_current_user, security
+from app.services import user_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -64,10 +65,24 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.get(
-    "/me", 
+    "/me",
     response_model=UserResponse,
     dependencies=[Security(security)]
 )
 async def get_me(current_user: dict = Depends(get_current_user)):
-    """Get current authenticated user."""
+    """Get current authenticated user (full user object: id, email, name, created_at, updated_at, profile_picture_url)."""
     return current_user
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    dependencies=[Security(security)]
+)
+async def update_me(
+    data: UserUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the current user. Send only the fields you want to change (name, profile_picture_url). Use null to clear profile_picture_url."""
+    return user_service.update_me(db, current_user["id"], data)
