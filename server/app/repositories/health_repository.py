@@ -11,4 +11,4 @@ class HealthRepository:
         """Execute a simple query to verify database connectivity."""
         result = self.db.execute(text("SELECT message FROM health"))
         row = result.fetchone()
-        return {"message": row[0] if row else "No message found"}
+        return {"message": row[0] if row else "No messages found"}
