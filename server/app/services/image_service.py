@@ -91,14 +91,17 @@ def update_image(db: Session, image_id: int, image_data: ImageUpdate, user_id: i
             detail="Only the image creator can update the image"
         )
     
+    # Only pass fields that were actually sent in the request (exclude_unset)
+    update_kwargs = image_data.model_dump(exclude_unset=True)
+    if not update_kwargs:
+        return ImageResponse(**image)
+    
+    print(f"[image_service] update_image id={image_id} update_kwargs={update_kwargs}", flush=True)
     # Update the image
     updated_image = image_repository.update_image(
         db=db,
         image_id=image_id,
-        caption=image_data.caption,
-        image_url=image_data.image_url,
-        latitude=image_data.latitude,
-        longitude=image_data.longitude
+        **update_kwargs
     )
     
     if not updated_image:
@@ -107,6 +110,7 @@ def update_image(db: Session, image_id: int, image_data: ImageUpdate, user_id: i
             detail="Failed to update image"
         )
     
+    print(f"[image_service] update_image returned caption={updated_image.get('caption')!r}", flush=True)
     return ImageResponse(**updated_image)
 
 

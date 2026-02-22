@@ -1,6 +1,6 @@
 # Memento API Server
 
-FastAPI server with Supabase backend.
+FastAPI server with a PostgreSQL database using Neon and optional Cloudinary for media.
 
 ## Setup
 
@@ -34,8 +34,7 @@ FastAPI server with Supabase backend.
    ```
 
    Update `.env` with your Supabase credentials:
-   - `SUPABASE_URL` - Your Supabase project URL
-   - `SUPABASE_PUBLISHABLE_KEY` - Your Supabase publishable (anon) key
+   - `DATABASE_URL` - Neon: Neon Console → your project → Connection details → connection string (Postgres URI).
 
 5. **Run the server**
    ```bash
@@ -70,4 +69,4 @@ app/
 | **Routers**      | Define API endpoints, delegate to controllers               |
 | **Controllers**  | Handle HTTP concerns (status codes, input validation, auth) |
 | **Services**     | Handling business logic, orchestrate repositories           |
-| **Repositories** | Executing database queries via Supabase client              |
+| **Repositories** | Executing database queries via SQLAlchemy (Postgres)       |
