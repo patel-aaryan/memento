@@ -25,7 +25,7 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
             detail="You don't have access to this album"
         )
     
-    # Create the image
+    # Create the image (taken_at = when photo was taken from EXIF, if provided)
     image = image_repository.create_image(
         db=db,
         album_id=image_data.album_id,
@@ -33,7 +33,8 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
         user_id=user_id,
         caption=image_data.caption,
         latitude=image_data.latitude,
-        longitude=image_data.longitude
+        longitude=image_data.longitude,
+        taken_at=image_data.taken_at
     )
     
     if not image:

@@ -2,9 +2,14 @@ package com.example.mementoandroid.ui.album
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.mementoandroid.ui.album.components.*
@@ -18,6 +23,7 @@ fun AlbumScreen(
     isSharedAlbum: Boolean,
     onBack: () -> Unit,
     onEditAlbumName: () -> Unit,
+    onSaveAlbumName: (newName: String) -> Unit = {},
     onDeleteAlbum: () -> Unit,
     onAddFriend: () -> Unit,
     onPhotoClick: (photoId: String) -> Unit,
@@ -25,6 +31,8 @@ fun AlbumScreen(
     modifier: Modifier = Modifier
 ) {
     var addPhotoSheetOpen by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editedName by remember(albumName, showEditDialog) { mutableStateOf(albumName) }
 
     if (addPhotoSheetOpen) {
         AddPhotoBottomSheet(
@@ -36,13 +44,47 @@ fun AlbumScreen(
         )
     }
 
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Edit album name") },
+            text = {
+                OutlinedTextField(
+                    value = editedName,
+                    onValueChange = { editedName = it },
+                    label = { Text("Album name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = editedName.trim()
+                        if (name.isNotBlank()) {
+                            onSaveAlbumName(name)
+                            showEditDialog = false
+                        }
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
             AlbumTopBar(
                 albumName = albumName,
                 onBack = onBack,
-                onEditAlbumName = onEditAlbumName,
+                onEditAlbumName = { showEditDialog = true },
                 onDeleteAlbum = onDeleteAlbum
             )
         }

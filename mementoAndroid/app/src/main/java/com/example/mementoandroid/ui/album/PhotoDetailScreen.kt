@@ -28,10 +28,13 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -58,6 +61,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.recordAudioToCache
+import com.example.mementoandroid.util.formatBackendDateTime
 import com.example.mementoandroid.util.formatPhotoMetadataDateTime
 import com.example.mementoandroid.util.formatPhotoMetadataLocation
 import androidx.compose.ui.Modifier
@@ -77,10 +81,12 @@ fun PhotoDetailScreen(
     mock: PhotoDetailMock,
     onBack: () -> Unit,
     onSave: (caption: String) -> Unit = {},
+    onDeletePhoto: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var menuExpanded by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     var notesText by remember(photo.id) { mutableStateOf(photo.caption?.takeIf { it.isNotBlank() } ?: mock.caption) }
     var displayedDateTime by remember(photo.id) { mutableStateOf(mock.dateTime) }
@@ -126,7 +132,7 @@ fun PhotoDetailScreen(
         }
     }
 
-    LaunchedEffect(photo.id, photo.uri, photo.imageUrl) {
+    LaunchedEffect(photo.id, photo.uri, photo.imageUrl, photo.dateAdded, photo.takenAt) {
         displayedDateTime = mock.dateTime
         displayedLocation = mock.location
         val uri = photo.uri
@@ -138,6 +144,10 @@ fun PhotoDetailScreen(
                     displayedLocation = formatPhotoMetadataLocation(it.latitude, it.longitude)
                 }
             }
+        }
+        if (displayedDateTime == mock.dateTime) {
+            formatBackendDateTime(photo.takenAt)?.let { displayedDateTime = it }
+                ?: formatBackendDateTime(photo.dateAdded)?.let { displayedDateTime = it }
         }
     }
 
@@ -152,8 +162,25 @@ fun PhotoDetailScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* menu */ }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                onClick = {
+                                    menuExpanded = false
+                                    onDeletePhoto()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                }
+                            )
+                        }
                     }
                 }
             )

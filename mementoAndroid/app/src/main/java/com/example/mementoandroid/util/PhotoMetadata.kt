@@ -202,6 +202,47 @@ fun formatPhotoMetadataDateTime(exifDateTime: String?): String? {
 }
 
 /**
+ * Converts EXIF date/time ("yyyy:MM:dd HH:mm:ss") to ISO 8601 for the API (e.g. "2025-01-15T15:42:00Z").
+ * Returns null if parsing fails.
+ */
+fun exifDateTimeToIso(exifDateTime: String?): String? {
+    if (exifDateTime.isNullOrBlank()) return null
+    return try {
+        val inFormat = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
+        val outFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        outFormat.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val date = inFormat.parse(exifDateTime.trim())
+        date?.let { outFormat.format(it) }
+    } catch (e: Exception) {
+        Log.d(TAG, "Could not convert EXIF to ISO: $exifDateTime", e)
+        null
+    }
+}
+
+/**
+ * Formats a backend timestamp (e.g. ISO "2025-01-15T15:42:00" or "2025-01-15 15:42:00")
+ * to display string like "Jan 15, 2025 · 3:42 PM". Returns null if parsing fails.
+ */
+fun formatBackendDateTime(backendDate: String?): String? {
+    if (backendDate.isNullOrBlank()) return null
+    return try {
+        val trimmed = backendDate.trim()
+        val inFormat = when {
+            trimmed.contains("T") -> SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+            trimmed.contains(" ") -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            else -> SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        }
+        inFormat.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val outFormat = SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault())
+        val date = inFormat.parse(trimmed.substringBefore(".").substringBefore("Z"))
+        date?.let { outFormat.format(it) }
+    } catch (e: Exception) {
+        Log.d(TAG, "Could not parse backend datetime: $backendDate", e)
+        null
+    }
+}
+
+/**
  * Formats latitude and longitude for display (e.g. "43.65° N, 79.38° W").
  */
 fun formatPhotoMetadataLocation(latitude: Double, longitude: Double): String {
