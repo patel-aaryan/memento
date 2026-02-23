@@ -151,6 +151,8 @@ class MainActivity : ComponentActivity() {
                                 caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                 latitude = lat,
                                 longitude = lon,
+                                dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() }
                             )
                         }
                         withContext(Dispatchers.Main) {
