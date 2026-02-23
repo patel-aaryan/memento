@@ -9,7 +9,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.Image
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.api.BackendClient
@@ -76,9 +79,13 @@ fun LoginScreen(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                text = "Memento",
-                style = MaterialTheme.typography.headlineLarge
+            Image(
+                painter = painterResource(R.drawable.memento_logo),
+                contentDescription = "Memento",
+                modifier = Modifier
+                    .fillMaxWidth(0.9f)
+                    .heightIn(max = 300.dp),
+                contentScale = ContentScale.Fit
             )
 
             Spacer(modifier = Modifier.height(32.dp))

@@ -9,6 +9,7 @@ class ImageCreate(BaseModel):
     image_url: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
 
 
 class ImageUpdate(BaseModel):
@@ -16,6 +17,7 @@ class ImageUpdate(BaseModel):
     image_url: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
 
 
 class ImageResponse(BaseModel):
@@ -26,6 +28,7 @@ class ImageResponse(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     date_added: str
+    taken_at: Optional[str] = None  # When photo was taken (from metadata), if set
     user_id: int
     created_at: str
     updated_at: str

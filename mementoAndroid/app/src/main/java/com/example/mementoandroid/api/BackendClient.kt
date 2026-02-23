@@ -55,6 +55,14 @@ object BackendClient {
         }
 
     /**
+     * PATCH [path] with optional JSON [body].
+     */
+    suspend fun patch(path: String, body: JSONObject? = null, token: String? = null): Result<JSONObject> =
+        withContext(Dispatchers.IO) {
+            request("PATCH", path, body = body, token = token)
+        }
+
+    /**
      * DELETE [path]. Returns success with empty JSONObject on 2xx (e.g. 204).
      */
     suspend fun delete(path: String, token: String? = null): Result<JSONObject> =

@@ -10,6 +10,8 @@ data class AlbumPhotoUi(
     val caption: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    val dateAdded: String? = null,
+    val takenAt: String? = null
 ) {
     init {
         require(listOf(imageRes, uri, imageUrl).any { it != null }) {
@@ -25,7 +27,8 @@ data class AlbumUi(
 
 data class FriendUi(
     val id: String,
-    val username: String
+    val username: String,
+    val profilePictureUrl: String? = null
 )
 
 enum class AddPhotoSource {Camera, Photos}

@@ -7,10 +7,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.mementoandroid.ui.album.FriendUi
 
 @Composable
@@ -27,7 +31,10 @@ fun FriendsRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         items(friends, key = { it.id }) { friend ->
-            FriendChip(username = friend.username)
+            FriendChip(
+                username = friend.username,
+                profilePictureUrl = friend.profilePictureUrl
+            )
         }
         item {
             AddFriendChip(onClick = onAddFriend)
@@ -36,16 +43,30 @@ fun FriendsRow(
 }
 
 @Composable
-private fun FriendChip(username: String) {
+private fun FriendChip(
+    username: String,
+    profilePictureUrl: String? = null
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.width(72.dp)
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.primaryContainer
-        ) {}
+        if (profilePictureUrl != null) {
+            AsyncImage(
+                model = profilePictureUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {}
+        }
         Spacer(Modifier.height(6.dp))
         Text(
             text = username,

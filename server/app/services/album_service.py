@@ -2,7 +2,9 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.repositories import album_repository, album_member_repository
+from app.repositories.user_repository import get_users_by_ids
 from app.schemas.album import AlbumCreate, AlbumUpdate, AlbumResponse, AlbumMemberAdd
+from app.schemas.auth import UserResponse
 
 
 def create_album(db: Session, album_data: AlbumCreate, owner_id: int) -> AlbumResponse:
@@ -165,4 +167,32 @@ def remove_album_member(db: Session, album_id: int, member_user_id: int, user_id
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Member not found in album"
         )
+
+
+def get_album_members(db: Session, album_id: int, user_id: int) -> List[UserResponse]:
+    """Get all members of an album as full user objects. Caller must be owner or member."""
+    album = album_repository.get_album_by_id(db, album_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found"
+        )
+    is_owner = album["owner_id"] == user_id
+    is_member = album_member_repository.is_album_member(db, album_id, user_id)
+    if not (is_owner or is_member):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this album"
+        )
+    member_rows = album_member_repository.get_album_members(db, album_id)
+    owner_id = album["owner_id"]
+    user_ids = list({owner_id} | {m["user_id"] for m in member_rows})
+    users = get_users_by_ids(db, user_ids)
+    user_by_id = {u["id"]: u for u in users}
+    ordered = [user_by_id[owner_id]] if owner_id in user_by_id else []
+    for m in member_rows:
+        uid = m["user_id"]
+        if uid != owner_id and uid in user_by_id:
+            ordered.append(user_by_id[uid])
+    return [UserResponse(**u) for u in ordered]
 

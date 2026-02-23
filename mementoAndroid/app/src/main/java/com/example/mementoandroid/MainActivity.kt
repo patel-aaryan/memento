@@ -12,8 +12,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -64,6 +66,7 @@ import com.example.mementoandroid.ui.album.getPhotoDetailMock
 import org.json.JSONObject
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
+import com.example.mementoandroid.util.exifDateTimeToIso
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
@@ -97,14 +100,7 @@ class MainActivity : ComponentActivity() {
                 var selectedPhotoId by rememberSaveable { mutableStateOf<String?>(null) }
                 var albums by remember { mutableStateOf<List<AlbumUi>>(emptyList()) }
                 val photos = remember { mutableStateListOf<AlbumPhotoUi>() }
-                val demoFriends = remember {
-                    listOf(
-                        FriendUi("1", "isla"),
-                        FriendUi("2", "blair"),
-                        FriendUi("3", "shannon"),
-                        FriendUi("4", "nick")
-                    )
-                }
+                var albumMembers by remember { mutableStateOf<List<FriendUi>>(emptyList()) }
                 var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
                 var pendingCameraFile by remember { mutableStateOf<File?>(null) }
 
@@ -124,9 +120,27 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(selectedAlbumId) {
-                    if (selectedAlbumId == null) return@LaunchedEffect
+                    if (selectedAlbumId == null) {
+                        withContext(Dispatchers.Main) { albumMembers = emptyList() }
+                        return@LaunchedEffect
+                    }
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
-                    BackendClient.getArray("/images/album/$selectedAlbumId", t).onSuccess { arr ->
+                    val aid = selectedAlbumId!!
+                    BackendClient.getArray("/albums/$aid/members", t).onSuccess { membersArr ->
+                        val currentUserId = AuthTokenStore.getUserId()?.toString()
+                        val list = (0 until membersArr.length())
+                            .map { i ->
+                                val o = membersArr.getJSONObject(i)
+                                FriendUi(
+                                    id = o.getInt("id").toString(),
+                                    username = o.getString("name"),
+                                    profilePictureUrl = o.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                            .filter { it.id != currentUserId }
+                        withContext(Dispatchers.Main) { albumMembers = list }
+                    }.onFailure { withContext(Dispatchers.Main) { albumMembers = emptyList() } }
+                    BackendClient.getArray("/images/album/$aid", t).onSuccess { arr ->
                         val list = (0 until arr.length()).map { i ->
                             val o = arr.getJSONObject(i)
                             val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
@@ -167,6 +181,8 @@ class MainActivity : ComponentActivity() {
                                         caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                         latitude = lat,
                                         longitude = lon,
+                                        dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                        takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() }
                                     )
                                 }
                                 withContext(Dispatchers.Main) {
@@ -175,7 +191,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             .onFailure { e -> withContext(Dispatchers.Main) { handle401(context, e) } }
-                    }
+                }
                 }
 
                 fun addPhotoWithUpload(
@@ -183,7 +199,8 @@ class MainActivity : ComponentActivity() {
                     fallbackUri: Uri?,
                     albumId: Int,
                     latitude: Double?,
-                    longitude: Double?
+                    longitude: Double?,
+                    takenAt: String? = null
                 ) {
                     val t = AuthTokenStore.get()
                     if (t == null) {
@@ -200,6 +217,7 @@ class MainActivity : ComponentActivity() {
                             put("image_url", url)
                             if (latitude != null) put("latitude", latitude)
                             if (longitude != null) put("longitude", longitude)
+                            if (takenAt != null) put("taken_at", takenAt)
                         }
                         BackendClient.post("/images", body, token = t)
                             .onSuccess { loadAlbumImages() }
@@ -217,7 +235,14 @@ class MainActivity : ComponentActivity() {
                         pendingCameraFile = null
                         pendingCameraUri = null
                         if (file != null && file.exists() && albumId != null) {
-                            addPhotoWithUpload(file, uri, albumId, null, null)
+                            scope.launch(Dispatchers.IO) {
+                                val md = extractPhotoMetadata(context, uri ?: Uri.fromFile(file))
+                                val takenAt = md?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                    ?: md?.dateTaken?.let { exifDateTimeToIso(it) }
+                                withContext(Dispatchers.Main) {
+                                    addPhotoWithUpload(file, uri, albumId, null, null, takenAt)
+                                }
+                            }
                         }
                     }
                 }
@@ -236,12 +261,15 @@ class MainActivity : ComponentActivity() {
                                 file.outputStream().use { input.copyTo(it) }
                             }
                             if (file.exists() && albumId != null) {
+                                val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                    ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
                                 addPhotoWithUpload(
                                     file,
                                     uri,
                                     albumId,
                                     metadata?.latitude,
-                                    metadata?.longitude
+                                    metadata?.longitude,
+                                    takenAt
                                 )
                             }
                         }
@@ -274,16 +302,17 @@ class MainActivity : ComponentActivity() {
                         val albumName = selectedAlbumName ?: ""
                         val photo = photos.find { it.id == selectedPhotoId }
                         if (photo != null) {
+                            val photoToDelete = photo
                             PhotoDetailScreen(
-                                photo = photo,
+                                photo = photoToDelete,
                                 albumName = albumName,
-                                mock = getPhotoDetailMock(albumName, photo.id),
+                                mock = getPhotoDetailMock(albumName, photoToDelete.id),
                                 onBack = { selectedPhotoId = null },
                                 onSave = { caption ->
                                     scope.launch {
                                         val t = AuthTokenStore.get() ?: return@launch
                                         val body = JSONObject().put("caption", caption)
-                                        val result = BackendClient.put("/images/${photo.id}", body, token = t)
+                                        val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
                                         withContext(Dispatchers.Main) {
                                             result.onFailure { handle401(context, it) }
                                             if (result.isSuccess) loadAlbumImages()
@@ -294,6 +323,33 @@ class MainActivity : ComponentActivity() {
                                             ).show()
                                         }
                                     }
+                                },
+                                onDeletePhoto = {
+                                    scope.launch {
+                                        val t = AuthTokenStore.get()
+                                        withContext(Dispatchers.Main) {
+                                            if (t == null) {
+                                                Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
+                                                return@withContext
+                                            }
+                                        }
+                                        val result = BackendClient.delete("/images/${photoToDelete.id}", token = t)
+                                        withContext(Dispatchers.Main) {
+                                            result.onFailure { e ->
+                                                handle401(context, e)
+                                                Toast.makeText(
+                                                    context,
+                                                    (e as? BackendException)?.message ?: "Failed to delete",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            if (result.isSuccess) {
+                                                photos.removeAll { it.id == photoToDelete.id }
+                                                selectedPhotoId = null
+                                                Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
                                 }
                             )
                         } else {
@@ -301,14 +357,35 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     selectedAlbumId != null -> {
+                        val albumId = selectedAlbumId!!
                         AlbumScreen(
                             modifier = Modifier.fillMaxSize(),
                             albumName = selectedAlbumName ?: "",
                             photos = photos,
-                            friends = demoFriends,
-                            isSharedAlbum = false,
+                            friends = albumMembers,
+                            isSharedAlbum = albumMembers.isNotEmpty(),
                             onBack = { selectedAlbumId = null },
                             onEditAlbumName = {},
+                            onSaveAlbumName = { newName ->
+                                scope.launch {
+                                    val t = AuthTokenStore.get() ?: return@launch
+                                    val body = JSONObject().put("name", newName)
+                                    val result = BackendClient.put("/albums/$albumId", body, token = t)
+                                    withContext(Dispatchers.Main) {
+                                        result.onFailure { handle401(context, it) }
+                                        if (result.isSuccess) {
+                                            albums = albums.map { if (it.id == albumId) it.copy(name = newName) else it }
+                                            Toast.makeText(context, "Album name updated", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                (result.exceptionOrNull() as? BackendException)?.message ?: "Failed to update",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            },
                             onDeleteAlbum = {},
                             onAddFriend = {},
                             onPhotoClick = { selectedPhotoId = it },
@@ -406,8 +483,16 @@ fun HomeScreen(
                             modifier = Modifier.size(24.dp),
                         )
                     },
-                    headlineContent = { Text(item.name) },
-                    supportingContent = { Text("") },
+                    headlineContent = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(24.dp),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            Text(item.name)
+                        }
+                    },
                 )
                 HorizontalDivider()
             }
