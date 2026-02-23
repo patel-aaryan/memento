@@ -72,6 +72,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
+import android.util.Log
+import com.example.mementoandroid.api.BackendClient
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,7 +134,7 @@ fun PhotoDetailScreen(
         }
     }
 
-    LaunchedEffect(photo.id, photo.uri, photo.imageUrl, photo.dateAdded, photo.takenAt) {
+    LaunchedEffect(photo.id, photo.uri, photo.imageUrl, photo.latitude, photo.longitude, photo.dateAdded, photo.takenAt) {
         displayedDateTime = mock.dateTime
         displayedLocation = mock.location
         val uri = photo.uri
@@ -141,8 +143,38 @@ fun PhotoDetailScreen(
             md?.let {
                 formatPhotoMetadataDateTime(it.dateTimeOriginal ?: it.dateTaken)?.let { displayedDateTime = it }
                 if (it.latitude != null && it.longitude != null) {
+                    // First show coordinate-based location as a quick fallback
                     displayedLocation = formatPhotoMetadataLocation(it.latitude, it.longitude)
+
+                    // Then try to resolve a human-readable place name from the backend
+                    val result = BackendClient.get(
+                        path = "/location/nearest-place?lat=${it.latitude}&lng=${it.longitude}"
+                    )
+                    result.onSuccess { json ->
+                        val placeName = json.optString("place_name", "")
+                        if (placeName.isNotBlank()) {
+                            displayedLocation = placeName
+                        }
+                    }.onFailure { e ->
+                        Log.w("PhotoDetailScreen", "Failed to fetch place name", e)
+                    }
                 }
+            }
+        } else if (photo.imageUrl != null && photo.latitude != null && photo.longitude != null) {
+            // For backend images that already have stored coordinates, use them to look up a place name.
+            // Show a simple coordinate-based location as an immediate fallback.
+            displayedLocation = formatPhotoMetadataLocation(photo.latitude, photo.longitude)
+
+            val result = BackendClient.get(
+                path = "/location/nearest-place?lat=${photo.latitude}&lng=${photo.longitude}"
+            )
+            result.onSuccess { json ->
+                val placeName = json.optString("place_name", "")
+                if (placeName.isNotBlank()) {
+                    displayedLocation = placeName
+                }
+            }.onFailure { e ->
+                Log.w("PhotoDetailScreen", "Failed to fetch place name for backend image", e)
             }
         }
         if (displayedDateTime == mock.dateTime) {

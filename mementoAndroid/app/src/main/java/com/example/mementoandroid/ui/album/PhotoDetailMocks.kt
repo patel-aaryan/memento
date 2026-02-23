@@ -154,7 +154,7 @@ fun getPhotoDetailMock(albumName: String, photoId: String): PhotoDetailMock {
         }
         else -> PhotoDetailMock(
             dateTime = "—",
-            location = albumName,
+            location = null,
             uploaderName = null,
             caption = "No caption.",
             hasAudio = false

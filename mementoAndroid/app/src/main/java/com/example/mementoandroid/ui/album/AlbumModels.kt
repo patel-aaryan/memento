@@ -8,6 +8,8 @@ data class AlbumPhotoUi(
     val uri: Uri? = null,
     val imageUrl: String? = null,
     val caption: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val dateAdded: String? = null,
     val takenAt: String? = null
 ) {
