@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
-from app.routers import health, auth, albums, images, audio, upload, location, users
+from app.routers import health, auth, albums, images, audio, upload, location, users, friends
 
 settings = get_settings()
 
@@ -40,6 +40,7 @@ def custom_openapi():
             "/auth/me",
             "/albums",
             "/users",
+            "/friends",
             "/images",
             "/audio",
             "/upload",
@@ -85,6 +86,7 @@ app.include_router(audio.router)
 app.include_router(upload.router)
 app.include_router(location.router)
 app.include_router(users.router)
+app.include_router(friends.router)
 
 
 @app.get("/")

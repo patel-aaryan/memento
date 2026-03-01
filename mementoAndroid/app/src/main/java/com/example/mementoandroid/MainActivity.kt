@@ -65,6 +65,7 @@ import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
 import org.json.JSONObject
 import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.PendingFriendTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.exifDateTimeToIso
 import com.example.mementoandroid.util.extractPhotoMetadata
@@ -108,6 +109,14 @@ class MainActivity : ComponentActivity() {
 
                 LaunchedEffect(Unit) {
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
+                    val pendingToken = PendingFriendTokenStore.get(context)
+                    if (pendingToken != null) {
+                        PendingFriendTokenStore.clear(context)
+                        val body = JSONObject().put("token", pendingToken)
+                        BackendClient.post("/friends/add_friend_by_link", body, token = t)
+                            .onSuccess { Toast.makeText(context, "Friend added!", Toast.LENGTH_SHORT).show() }
+                            .onFailure { handle401(context, it) }
+                    }
                     BackendClient.getArray("/albums", t)
                         .onSuccess { arr ->
                             val list = (0 until arr.length()).map { i ->

@@ -51,6 +51,17 @@
             android:exported="true"
             android:theme="@style/Theme.MementoAndroid">
         </activity>
+        <activity
+            android:name=".AddFriendActivity"
+            android:exported="true"
+            android:theme="@style/Theme.MementoAndroid">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="memento" android:host="add_friend" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

@@ -1,10 +1,13 @@
 package com.example.mementoandroid
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -75,25 +78,11 @@ class ProfileActivity : ComponentActivity() {
                 val context = LocalContext.current as ComponentActivity
                 val token = AuthTokenStore.get()
                 var user by remember { mutableStateOf<UserProfile?>(null) }
+                var friends by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
                 var addPhotoSheetOpen by remember { mutableStateOf(false) }
                 var pendingProfileFile by remember { mutableStateOf<File?>(null) }
                 var pendingProfileUri by remember { mutableStateOf<Uri?>(null) }
                 val scope = rememberCoroutineScope()
-
-                LaunchedEffect(Unit) {
-                    token ?: return@LaunchedEffect
-                    BackendClient.get("/auth/me", token)
-                        .onSuccess { j ->
-                            withContext(Dispatchers.Main) {
-                                user = UserProfile(
-                                    name = j.optString("name", ""),
-                                    email = j.optString("email", ""),
-                                    profilePictureUrl = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
-                                )
-                            }
-                        }
-                        .onFailure { handle401(context, it) }
-                }
 
                 fun refetchUser() {
                     val t = AuthTokenStore.get() ?: return
@@ -110,6 +99,45 @@ class ProfileActivity : ComponentActivity() {
                             }
                             .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
                     }
+                }
+
+                fun refetchFriends() {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.getArray("/friends", t)
+                            .onSuccess { arr ->
+                                val list = (0 until arr.length()).map { i ->
+                                    val o = arr.getJSONObject(i)
+                                    UserProfile(
+                                        name = o.optString("name", ""),
+                                        email = o.optString("email", ""),
+                                        profilePictureUrl = o.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                    )
+                                }
+                                withContext(Dispatchers.Main) {
+                                    friends = list
+                                }
+                            }
+                            .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    token ?: return@LaunchedEffect
+                    BackendClient.get("/auth/me", token)
+                        .onSuccess { j ->
+                            withContext(Dispatchers.Main) {
+                                user = UserProfile(
+                                    name = j.optString("name", ""),
+                                    email = j.optString("email", ""),
+                                    profilePictureUrl = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                        }
+                        .onFailure { handle401(context, it) }
+
+                    // Fetch initial friends list
+                    refetchFriends()
                 }
 
                 fun uploadProfilePhoto(photoFile: File) {
@@ -192,11 +220,83 @@ class ProfileActivity : ComponentActivity() {
                     }
                 }
 
+                fun addFriendByEmail(email: String) {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        val body = JSONObject().apply { put("email", email) }
+                        BackendClient.post("/friends/add_friend", body, token = t)
+                            .onSuccess {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Friend added", Toast.LENGTH_SHORT).show()
+                                }
+                                refetchFriends()
+                            }
+                            .onFailure { e ->
+                                withContext(Dispatchers.Main) {
+                                    if (e is BackendException && e.statusCode == 401) {
+                                        handle401(context, e)
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            e.message ?: "Failed to add friend",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                    }
+                }
+
+                fun getFriendLink() {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.get("/friends/get_friend_link", t)
+                            .onSuccess { j ->
+                                val link = j.optString("link", "")
+                                withContext(Dispatchers.Main) {
+                                    if (link.isNotBlank()) {
+                                        val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                        clipboard?.setPrimaryClip(
+                                            ClipData.newPlainText("Friend link", link)
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            "Friend link copied to clipboard",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "Failed to get friend link",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                            .onFailure { e ->
+                                withContext(Dispatchers.Main) {
+                                    if (e is BackendException && e.statusCode == 401) {
+                                        handle401(context, e)
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            e.message ?: "Failed to get friend link",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                    }
+                }
+
                 ProfileScreen(
                     user = user,
+                    friends = friends,
                     onBack = { finish() },
                     onProfilePictureClick = { addPhotoSheetOpen = true },
-                    onSaveName = ::saveName
+                    onSaveName = ::saveName,
+                    onGetFriendLink = ::getFriendLink,
+                    onAddFriendByEmail = ::addFriendByEmail
                 )
             }
         }
@@ -207,9 +307,12 @@ class ProfileActivity : ComponentActivity() {
 @Composable
 fun ProfileScreen(
     user: UserProfile?,
+    friends: List<UserProfile> = emptyList(),
     onBack: () -> Unit,
     onProfilePictureClick: () -> Unit,
-    onSaveName: ((String) -> Unit)? = null
+    onSaveName: ((String) -> Unit)? = null,
+    onGetFriendLink: (() -> Unit)? = null,
+    onAddFriendByEmail: ((String) -> Unit)? = null
 ) {
     val profileName = user?.name ?: "Loading..."
     val profileEmail = user?.email ?: ""
@@ -217,6 +320,7 @@ fun ProfileScreen(
     var showNameDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
     var darkModeEnabled by remember { mutableStateOf(false) }
+    var friendEmail by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -323,6 +427,119 @@ fun ProfileScreen(
                         checked = darkModeEnabled,
                         onCheckedChange = { darkModeEnabled = it }
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Friends section
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Friends",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (onGetFriendLink != null) {
+                    Button(
+                        onClick = onGetFriendLink,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Get friend link")
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                if (onAddFriendByEmail != null) {
+                    OutlinedTextField(
+                        value = friendEmail,
+                        onValueChange = { friendEmail = it },
+                        label = { Text("Friend email") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            val trimmed = friendEmail.trim()
+                            if (trimmed.isNotEmpty()) {
+                                onAddFriendByEmail(trimmed)
+                                friendEmail = ""
+                            }
+                        },
+                        enabled = friendEmail.isNotBlank(),
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Add friend")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                if (friends.isEmpty()) {
+                    Text(
+                        text = "No friends yet",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        friends.forEach { friend ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!friend.profilePictureUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = friend.profilePictureUrl,
+                                            contentDescription = "Friend avatar",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = "Friend",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                Column {
+                                    Text(
+                                        text = friend.name.ifBlank { "Unnamed" },
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = friend.email,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -457,6 +674,10 @@ fun ImagePickerPopup(
 fun ProfileScreenPreview() {
     ProfileScreen(
         user = UserProfile("Jane", "jane@example.com", null),
+        friends = listOf(
+            UserProfile("Alex", "alex@example.com", null),
+            UserProfile("Sam", "sam@example.com", null)
+        ),
         onBack = {},
         onProfilePictureClick = {}
     )

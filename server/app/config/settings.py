@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # Google API settings
     google_api_key: str = ""
 
+    # Base URL for friend invite links (e.g. https://api.memento.app)
+    app_base_url: str = "http://localhost:8000"
+
     class Config:
         env_file = ".env"
 
