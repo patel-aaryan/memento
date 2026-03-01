@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -82,7 +84,7 @@ fun PhotoDetailScreen(
     albumName: String,
     mock: PhotoDetailMock,
     onBack: () -> Unit,
-    onSave: (caption: String) -> Unit = {},
+    onSave: (caption: String, takenAt: String?, latitude: Double?, longitude: Double?, audioFilePath: String?) -> Unit = { _, _, _, _, _ -> },
     onDeletePhoto: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -93,6 +95,10 @@ fun PhotoDetailScreen(
     var notesText by remember(photo.id) { mutableStateOf(photo.caption?.takeIf { it.isNotBlank() } ?: mock.caption) }
     var displayedDateTime by remember(photo.id) { mutableStateOf(mock.dateTime) }
     var displayedLocation by remember(photo.id) { mutableStateOf(mock.location) }
+    var isEditMode by remember(photo.id) { mutableStateOf(false) }
+    var editedTakenAt by remember(photo.id) { mutableStateOf(photo.takenAt ?: "") }
+    // Location search text — for future Google Maps Places autocomplete; selection will provide new lat/lng
+    var editedLocationText by remember(photo.id) { mutableStateOf("") }
     var recordedAudioPath by remember(photo.id) { mutableStateOf<String?>(null) }
     var isRecording by remember(photo.id) { mutableStateOf(false) }
     var isPlaying by remember(photo.id) { mutableStateOf(false) }
@@ -203,6 +209,25 @@ fun PhotoDetailScreen(
                             onDismissRequest = { menuExpanded = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text(if (isEditMode) "Done" else "Edit") },
+                                onClick = {
+                                    menuExpanded = false
+                                    if (isEditMode) {
+                                        isEditMode = false
+                                    } else {
+                                        editedTakenAt = photo.takenAt ?: ""
+                                        editedLocationText = displayedLocation ?: ""
+                                        isEditMode = true
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isEditMode) Icons.Default.Check else Icons.Default.Edit,
+                                        contentDescription = null
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Delete") },
                                 onClick = {
                                     menuExpanded = false
@@ -269,27 +294,57 @@ fun PhotoDetailScreen(
                     .padding(top = 20.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Date & time
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Schedule,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Date & time (editable in edit mode)
+                if (isEditMode) {
                     Text(
-                        text = displayedDateTime,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        text = "Date & time",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    OutlinedTextField(
+                        value = editedTakenAt,
+                        onValueChange = { editedTakenAt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("e.g. 2025-01-15T14:30:00") }
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Schedule,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = displayedDateTime,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
 
-                // Location (from metadata if available, else mock)
-                if (displayedLocation != null) {
+                // Location (editable in edit mode — search/select; lat/lng from upload metadata are kept until user selects a new place via future Google Maps integration)
+                if (isEditMode) {
+                    Text(
+                        text = "Location",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = editedLocationText,
+                        onValueChange = { editedLocationText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("Search for a location (e.g. city or address)") }
+                        // TODO: Hook up Google Maps Places Autocomplete — use editedLocationText as query,
+                        // show suggestions, on selection get lat/lng and pass to onSave so backend is updated.
+                    )
+                } else if (displayedLocation != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -330,8 +385,10 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Audio recording (underneath location)
-                val hasRecording = recordedAudioPath != null
+                // Audio recording or persisted voice note (underneath location)
+                val hasLocalRecording = recordedAudioPath != null
+                val hasPersistedAudio = photo.audioUrl != null
+                val hasRecording = hasLocalRecording || hasPersistedAudio
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -341,7 +398,6 @@ fun PhotoDetailScreen(
                                     scope.launch { stopChannel.send(Unit) }
                                 }
                                 hasRecording -> {
-                                    val path = recordedAudioPath ?: return@clickable
                                     if (mediaPlayer?.isPlaying == true) {
                                         mediaPlayerHolder.current?.release()
                                         mediaPlayerHolder.current = null
@@ -350,6 +406,10 @@ fun PhotoDetailScreen(
                                     } else {
                                         mediaPlayerHolder.current?.release()
                                         mediaPlayerHolder.current = null
+                                        val dataSource = when {
+                                            hasLocalRecording -> recordedAudioPath!!
+                                            else -> photo.audioUrl!!
+                                        }
                                         val player = MediaPlayer().apply {
                                             setAudioAttributes(
                                                 AudioAttributes.Builder()
@@ -357,7 +417,7 @@ fun PhotoDetailScreen(
                                                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                                                     .build()
                                             )
-                                            setDataSource(path)
+                                            setDataSource(dataSource)
                                             prepareAsync()
                                             setOnPreparedListener { start(); isPlaying = true }
                                             setOnCompletionListener {
@@ -365,6 +425,13 @@ fun PhotoDetailScreen(
                                                 mediaPlayerHolder.current = null
                                                 mediaPlayer = null
                                                 isPlaying = false
+                                            }
+                                            setOnErrorListener { _, _, _ ->
+                                                release()
+                                                mediaPlayerHolder.current = null
+                                                mediaPlayer = null
+                                                isPlaying = false
+                                                true
                                             }
                                         }
                                         mediaPlayerHolder.current = player
@@ -446,12 +513,23 @@ fun PhotoDetailScreen(
                         focusManager.clearFocus()
                         scope.launch {
                             delay(150)
-                            withContext(Dispatchers.Main) { onSave(notesText) }
+                            val takenAt = editedTakenAt.takeIf { it.isNotBlank() }
+                            // When Google Maps Places is integrated: get lat/lng from selected place and pass here
+                            val lat: Double? = null
+                            val lng: Double? = null
+                            withContext(Dispatchers.Main) {
+                                onSave(notesText, takenAt, lat, lng, recordedAudioPath)
+                                if (isEditMode) {
+                                    isEditMode = false
+                                    if (takenAt != null) displayedDateTime = formatBackendDateTime(takenAt) ?: takenAt
+                                    if (lat != null && lng != null) displayedLocation = formatPhotoMetadataLocation(lat, lng)
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Save")
+                    Text(if (isEditMode) "Save changes" else "Save")
                 }
             }
         }

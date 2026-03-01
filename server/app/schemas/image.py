@@ -7,6 +7,7 @@ class ImageCreate(BaseModel):
     album_id: int
     caption: Optional[str] = None
     image_url: str
+    audio_url: Optional[str] = None  # Cloudinary URL after audio upload
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
@@ -15,6 +16,7 @@ class ImageCreate(BaseModel):
 class ImageUpdate(BaseModel):
     caption: Optional[str] = None
     image_url: Optional[str] = None
+    audio_url: Optional[str] = None  # Cloudinary URL after audio upload
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
@@ -25,6 +27,7 @@ class ImageResponse(BaseModel):
     album_id: int
     caption: Optional[str]
     image_url: str
+    audio_url: Optional[str] = None  # Cloudinary URL for voice note
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     date_added: str

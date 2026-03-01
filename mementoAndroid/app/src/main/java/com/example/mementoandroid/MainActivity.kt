@@ -154,15 +154,16 @@ class MainActivity : ComponentActivity() {
                             val o = arr.getJSONObject(i)
                             val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
                             val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
-                            AlbumPhotoUi(
-                                id = o.getInt("id").toString(),
-                                imageUrl = o.getString("image_url"),
-                                caption = o.optString("caption", "").takeIf { it.isNotBlank() },
-                                latitude = lat,
-                                longitude = lon,
-                                dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
-                                takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() }
-                            )
+                                        AlbumPhotoUi(
+                                            id = o.getInt("id").toString(),
+                                            imageUrl = o.getString("image_url"),
+                                            audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                            caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                            latitude = lat,
+                                            longitude = lon,
+                                            dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                            takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() }
+                                        )
                         }
                         withContext(Dispatchers.Main) {
                             photos.clear()
@@ -189,6 +190,7 @@ class MainActivity : ComponentActivity() {
                                     AlbumPhotoUi(
                                         id = o.getInt("id").toString(),
                                         imageUrl = o.getString("image_url"),
+                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
                                         caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                         latitude = lat,
                                         longitude = lon,
@@ -319,17 +321,30 @@ class MainActivity : ComponentActivity() {
                                 albumName = albumName,
                                 mock = getPhotoDetailMock(albumName, photoToDelete.id),
                                 onBack = { selectedPhotoId = null },
-                                onSave = { caption ->
+                                onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
                                     scope.launch {
                                         val t = AuthTokenStore.get() ?: return@launch
-                                        val body = JSONObject().put("caption", caption)
+                                        var audioUrl: String? = null
+                                        if (!audioFilePath.isNullOrBlank()) {
+                                            val file = java.io.File(audioFilePath)
+                                            if (file.exists()) {
+                                                audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
+                                            }
+                                        }
+                                        val body = JSONObject().apply {
+                                            put("caption", caption)
+                                            takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
+                                            latitude?.let { put("latitude", it) }
+                                            longitude?.let { put("longitude", it) }
+                                            audioUrl?.let { put("audio_url", it) }
+                                        }
                                         val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
                                         withContext(Dispatchers.Main) {
                                             result.onFailure { handle401(context, it) }
                                             if (result.isSuccess) loadAlbumImages()
                                             Toast.makeText(
                                                 context,
-                                                if (result.isSuccess) "Notes saved" else result.exceptionOrNull()?.message ?: "Failed to save",
+                                                if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         }

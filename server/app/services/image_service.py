@@ -32,6 +32,7 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
         image_url=image_data.image_url,
         user_id=user_id,
         caption=image_data.caption,
+        audio_url=image_data.audio_url,
         latitude=image_data.latitude,
         longitude=image_data.longitude,
         taken_at=image_data.taken_at
