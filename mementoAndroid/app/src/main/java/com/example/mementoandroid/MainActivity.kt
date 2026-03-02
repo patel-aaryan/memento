@@ -73,6 +73,10 @@ import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
 import android.util.Log
 import android.widget.Toast
+import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,18 +95,52 @@ private fun handle401(context: ComponentActivity, e: Throwable) {
 }
 
 class MainActivity : ComponentActivity() {
+    
+    // Request notification permission (Android 13+)
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d(TAG, "✓ Notification permission granted")
+            Toast.makeText(this, "Notifications enabled", Toast.LENGTH_SHORT).show()
+        } else {
+            Log.w(TAG, "✗ Notification permission denied")
+            Toast.makeText(this, "Notifications disabled", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        
+        // Request notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    Log.d(TAG, "✓ Notification permission already granted")
+                }
+                else -> {
+                    Log.d(TAG, "Requesting notification permission...")
+                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        }
         
         // Get Firebase Cloud Messaging token
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 val token = task.result
+                Log.d(TAG, "========================================")
                 Log.d(TAG, "FCM Device Token: $token")
+                Log.d(TAG, "========================================")
+                Toast.makeText(this, "FCM Token copied to logs", Toast.LENGTH_LONG).show()
                 // TODO: Send this token to your backend to store with user profile
             } else {
                 Log.e(TAG, "Failed to get FCM token", task.exception)
+                Toast.makeText(this, "Failed to get FCM token", Toast.LENGTH_SHORT).show()
             }
         }
         
