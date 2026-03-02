@@ -29,12 +29,11 @@ COPY --from=builder /install /usr/local
 # Create a non-root user for security
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
-# Copy application source
+# Copy application source with proper ownership
 COPY --chown=appuser:appgroup app/ ./app/
 
-# Copy Firebase service account key (optional, for local Docker only)
-# For production, use FIREBASE_SERVICE_ACCOUNT_JSON environment variable
-COPY --chown=appuser:appgroup serviceAccountKey.json ./serviceAccountKey.json 2>/dev/null || true
+# Copy Firebase service account key with proper ownership
+COPY --chown=appuser:appgroup serviceAccountKey.json ./serviceAccountKey.json
 
 USER appuser
 
