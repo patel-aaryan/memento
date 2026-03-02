@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "328882013623",
+    "project_id": "momento-bef77",
+    "storage_bucket": "momento-bef77.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:328882013623:android:8c53955ff368907a901432",
+        "android_client_info": {
+          "package_name": "com.example.mementoandroid"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBX39FCIwpfW9VQGvklERFeS_S9TGuHZvo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

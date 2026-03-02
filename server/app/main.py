@@ -1,15 +1,28 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
+from app.config.firebase import initialize_firebase
 from app.routers import health, auth, albums, images, audio, upload, location, users, friends
 
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application lifespan events"""
+    # Startup
+    initialize_firebase()
+    yield
+    # Shutdown (if needed in the future)
+
 
 app = FastAPI(
     title="Memento API",
     description="FastAPI server with Neon database backend",
     version="1.0.0",
     debug=settings.debug,
+    lifespan=lifespan,
 )
 
 
