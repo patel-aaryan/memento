@@ -32,6 +32,9 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 # Copy application source
 COPY app/ ./app/
 
+# Copy Firebase service account key
+COPY serviceAccountKey.json ./serviceAccountKey.json
+
 USER appuser
 
 EXPOSE 8000

@@ -76,6 +76,7 @@ import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.google.firebase.messaging.FirebaseMessaging
 
 
 
@@ -93,6 +94,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        
+        // Get Firebase Cloud Messaging token
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d(TAG, "FCM Device Token: $token")
+                // TODO: Send this token to your backend to store with user profile
+            } else {
+                Log.e(TAG, "Failed to get FCM token", task.exception)
+            }
+        }
+        
         enableEdgeToEdge()
         setContent {
             MementoAndroidTheme {
