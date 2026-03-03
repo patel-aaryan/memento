@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
                                         AlbumPhotoUi(
                                             id = o.getInt("id").toString(),
                                             imageUrl = o.getString("image_url"),
-                                            audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                            audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() && it != "null" },
                                             caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                             latitude = lat,
                                             longitude = lon,
@@ -241,7 +241,7 @@ class MainActivity : ComponentActivity() {
                                     AlbumPhotoUi(
                                         id = o.getInt("id").toString(),
                                         imageUrl = o.getString("image_url"),
-                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() && it != "null" },
                                         caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                         latitude = lat,
                                         longitude = lon,
@@ -372,6 +372,22 @@ class MainActivity : ComponentActivity() {
                                 albumName = albumName,
                                 mock = getPhotoDetailMock(albumName, photoToDelete.id),
                                 onBack = { selectedPhotoId = null },
+                                onDeleteAudio = {
+                                    scope.launch {
+                                        val t = AuthTokenStore.get() ?: return@launch
+                                        val body = JSONObject().put("audio_url", JSONObject.NULL)
+                                        val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                        withContext(Dispatchers.Main) {
+                                            result.onFailure { handle401(context, it) }
+                                            if (result.isSuccess) loadAlbumImages()
+                                            Toast.makeText(
+                                                context,
+                                                if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                },
                                 onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
                                     scope.launch {
                                         val t = AuthTokenStore.get() ?: return@launch

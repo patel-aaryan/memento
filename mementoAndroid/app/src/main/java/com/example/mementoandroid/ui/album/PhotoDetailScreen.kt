@@ -86,6 +86,7 @@ fun PhotoDetailScreen(
     onBack: () -> Unit,
     onSave: (caption: String, takenAt: String?, latitude: Double?, longitude: Double?, audioFilePath: String?) -> Unit = { _, _, _, _, _ -> },
     onDeletePhoto: () -> Unit = {},
+    onDeleteAudio: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -385,9 +386,9 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Audio recording or persisted voice note (underneath location)
-                val hasLocalRecording = recordedAudioPath != null
-                val hasPersistedAudio = photo.audioUrl != null
+                // Audio: only "has recording" when we have real local or persisted URL (not blank/"null")
+                val hasLocalRecording = !recordedAudioPath.isNullOrBlank()
+                val hasPersistedAudio = !photo.audioUrl.isNullOrBlank() && photo.audioUrl != "null"
                 val hasRecording = hasLocalRecording || hasPersistedAudio
                 Card(
                     modifier = Modifier
@@ -404,12 +405,14 @@ fun PhotoDetailScreen(
                                         mediaPlayer = null
                                         isPlaying = false
                                     } else {
-                                        mediaPlayerHolder.current?.release()
-                                        mediaPlayerHolder.current = null
                                         val dataSource = when {
                                             hasLocalRecording -> recordedAudioPath!!
-                                            else -> photo.audioUrl!!
+                                            hasPersistedAudio -> photo.audioUrl!!
+                                            else -> null
                                         }
+                                        if (dataSource.isNullOrBlank()) return@clickable
+                                        mediaPlayerHolder.current?.release()
+                                        mediaPlayerHolder.current = null
                                         val player = MediaPlayer().apply {
                                             setAudioAttributes(
                                                 AudioAttributes.Builder()
@@ -487,6 +490,19 @@ fun PhotoDetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            // In edit mode, allow deleting audio when there is one
+                            if (isEditMode && hasRecording) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Delete audio",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.clickable {
+                                        recordedAudioPath = null
+                                        onDeleteAudio()
+                                    }
+                                )
+                            }
                         }
                     }
                 }

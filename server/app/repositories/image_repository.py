@@ -77,61 +77,44 @@ def get_image_by_id(db: Session, image_id: int) -> Optional[dict]:
     return None
 
 
+_UPDATEABLE_IMAGE_KEYS = ("caption", "image_url", "audio_url", "latitude", "longitude", "taken_at")
+
+
 def update_image(
     db: Session,
     image_id: int,
-    caption: Optional[str] = None,
-    image_url: Optional[str] = None,
-    audio_url: Optional[str] = None,
-    latitude: Optional[float] = None,
-    longitude: Optional[float] = None,
-    taken_at: Optional[str] = None,
-    **kwargs  # ignore any extra keys from model_dump()
+    updates: dict,
 ) -> Optional[dict]:
-    """Update an image. Only include fields that are not None."""
-    # Build dynamic update query
-    updates = []
+    """Update an image. updates is a dict of field -> value (e.g. from model_dump(exclude_unset=True)).
+    Values can be None to clear optional fields (e.g. audio_url)."""
+    # Build dynamic update query from only the keys that were sent
+    set_clauses = []
     params = {"image_id": image_id}
-    
-    if caption is not None:
-        updates.append("caption = :caption")
-        params["caption"] = caption
-    
-    if image_url is not None:
-        updates.append("image_url = :image_url")
-        params["image_url"] = image_url
-    
-    if audio_url is not None:
-        updates.append("audio_url = :audio_url")
-        params["audio_url"] = audio_url
-    
-    if latitude is not None:
-        updates.append("latitude = :latitude")
-        params["latitude"] = latitude
-    
-    if longitude is not None:
-        updates.append("longitude = :longitude")
-        params["longitude"] = longitude
-    
-    if taken_at is not None:
-        updates.append("taken_at = CAST(:taken_at AS TIMESTAMPTZ)")
-        params["taken_at"] = taken_at
-    
-    if not updates:
+    for key in _UPDATEABLE_IMAGE_KEYS:
+        if key not in updates:
+            continue
+        value = updates[key]
+        if key == "taken_at":
+            set_clauses.append("taken_at = CAST(:taken_at AS TIMESTAMPTZ)")
+            params["taken_at"] = value
+        else:
+            set_clauses.append(f"{key} = :{key}")
+            params[key] = value
+
+    if not set_clauses:
         return get_image_by_id(db, image_id)
-    
-    # Explicitly set updated_at so the row is touched and trigger runs
-    updates.append("updated_at = CURRENT_TIMESTAMP")
-    
+
+    set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+
     query = text(f"""
         UPDATE images
-        SET {', '.join(updates)}
+        SET {', '.join(set_clauses)}
         WHERE id = :image_id
         RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
     """)
-    
+
     try:
-        print(f"[image_repository] UPDATE images SET {', '.join(updates)} WHERE id=:image_id params={params}", flush=True)
+        print(f"[image_repository] UPDATE images SET {', '.join(set_clauses)} WHERE id=:image_id params={params}", flush=True)
         result = db.execute(query, params)
         row = result.fetchone()
         db.commit()
