@@ -5,11 +5,18 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,11 +26,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.content.FileProvider
+import java.io.File
+import java.util.UUID
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.api.BackendException
+import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.album.AlbumScreen
@@ -37,10 +52,17 @@ import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
+import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.exifDateTimeToIso
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
+import android.util.Log
+import android.widget.Toast
+import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,6 +71,8 @@ import java.io.File
 import com.example.mementoandroid.ui.album.CreateAlbumScreen
 import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
 import com.example.mementoandroid.ui.home.HomePhotoMetadata
+import com.google.firebase.messaging.FirebaseMessaging
+
 
 
 private const val TAG = "MainActivity"
@@ -62,9 +86,55 @@ private fun handle401(context: ComponentActivity, e: Throwable) {
 }
 
 class MainActivity : ComponentActivity() {
+
+    // Request notification permission (Android 13+)
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d(TAG, "✓ Notification permission granted")
+            Toast.makeText(this, "Notifications enabled", Toast.LENGTH_SHORT).show()
+        } else {
+            Log.w(TAG, "✗ Notification permission denied")
+            Toast.makeText(this, "Notifications disabled", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+
+        // Request notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    Log.d(TAG, "✓ Notification permission already granted")
+                }
+                else -> {
+                    Log.d(TAG, "Requesting notification permission...")
+                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        }
+
+        // Get Firebase Cloud Messaging token
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d(TAG, "========================================")
+                Log.d(TAG, "FCM Device Token: $token")
+                Log.d(TAG, "========================================")
+                Toast.makeText(this, "FCM Token copied to logs", Toast.LENGTH_LONG).show()
+                // TODO: Send this token to your backend to store with user profile
+            } else {
+                Log.e(TAG, "Failed to get FCM token", task.exception)
+                Toast.makeText(this, "Failed to get FCM token", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         enableEdgeToEdge()
         setContent {
             MementoAndroidTheme {
@@ -195,6 +265,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     val t = AuthTokenStore.get()
                     if (t == null) {
+                        Log.w(TAG, "Upload skipped: no auth token. Add photo from Login first.")
                         return
                     }
                     scope.launch {
