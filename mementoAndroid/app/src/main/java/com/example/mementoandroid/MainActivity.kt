@@ -1,22 +1,19 @@
 package com.example.mementoandroid
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -26,53 +23,39 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.LaunchedEffect
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import java.io.File
-import java.util.UUID
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.api.BackendException
-import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.album.AlbumScreen
 import com.example.mementoandroid.ui.album.AlbumUi
+import com.example.mementoandroid.ui.album.CreateAlbumScreen
 import com.example.mementoandroid.ui.album.FriendUi
 import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
+import com.example.mementoandroid.ui.album.components.FriendPickerScreen
 import com.example.mementoandroid.ui.home.HomeAddAction
+import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
+import com.example.mementoandroid.ui.home.HomePhotoMetadata
 import com.example.mementoandroid.ui.home.HomeScreen
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
-import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.exifDateTimeToIso
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
-import android.util.Log
-import android.widget.Toast
-import android.os.Build
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import com.example.mementoandroid.ui.album.CreateAlbumScreen
-import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
-import com.example.mementoandroid.ui.home.HomePhotoMetadata
-import com.google.firebase.messaging.FirebaseMessaging
-
 
 
 private const val TAG = "MainActivity"
@@ -150,6 +133,8 @@ class MainActivity : ComponentActivity() {
                 var pendingHomePhotoEntry by rememberSaveable { mutableStateOf<HomePhotoMetadata?>(null) }
 
                 var showCreateAlbum by rememberSaveable { mutableStateOf(false) }
+                var showFriendPicker by remember { mutableStateOf(false) }
+                var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
 
                 val scope = rememberCoroutineScope()
 
@@ -402,6 +387,29 @@ class MainActivity : ComponentActivity() {
                 val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.name }
 
                 when {
+                    showFriendPicker && pendingAlbumIdForFriend != null -> {
+                        BackHandler {
+                            showFriendPicker = false
+                            pendingAlbumIdForFriend = null
+                        }
+                        FriendPickerScreen(
+                            albumId = pendingAlbumIdForFriend!!,
+                            currentFriends = if (selectedAlbumId != null) albumMembers else emptyList(),
+                            onBack = {
+                                showFriendPicker = false
+                                pendingAlbumIdForFriend = null
+                            },
+                            onFriendsAdded = { newFriends ->
+                                if (selectedAlbumId != null) {
+                                    // Update existing album's friends list
+                                    albumMembers = albumMembers + newFriends
+                                }
+                                showFriendPicker = false
+                                pendingAlbumIdForFriend = null
+                            }
+                        )
+                    }
+
                     showCreateAlbum -> {
                         BackHandler { showCreateAlbum = false }
                         CreateAlbumScreen(
@@ -422,6 +430,10 @@ class MainActivity : ComponentActivity() {
                                             }
                                     }
                                 }
+                            },
+                            onAddFriend = { albumId ->
+                                pendingAlbumIdForFriend = albumId
+                                showFriendPicker = true
                             },
                             onAddPhoto = ::onAddPhoto,
                             modifier = Modifier.fillMaxSize()
@@ -556,7 +568,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onDeleteAlbum = {},
-                            onAddFriend = {},
+                            onAddFriend = {
+                                pendingAlbumIdForFriend = albumId
+                                showFriendPicker = true
+                            },
                             onPhotoClick = { selectedPhotoId = it },
                             onAddPhoto = ::onAddPhoto
                         )

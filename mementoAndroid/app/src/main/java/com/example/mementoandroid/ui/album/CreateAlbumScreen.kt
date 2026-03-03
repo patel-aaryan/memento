@@ -38,6 +38,13 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
 import android.util.Log
+import com.example.mementoandroid.ui.album.components.FriendPickerScreen
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+
 
 private const val TAG = "CreateAlbumScreen"
 
@@ -46,6 +53,7 @@ private const val TAG = "CreateAlbumScreen"
 fun CreateAlbumScreen(
     onBack: () -> Unit,
     onAlbumCreated: (Int, String) -> Unit,
+    onAddFriend: (Int) -> Unit,
     onAddPhoto: (AddPhotoSource) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -55,13 +63,14 @@ fun CreateAlbumScreen(
     var albumName by rememberSaveable { mutableStateOf("") }
     var albumId by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    var friends by remember { mutableStateOf(emptyList<FriendUi>()) }
+    var friends by rememberSaveable { mutableStateOf(emptyList<FriendUi>()) }
     var photos by remember { mutableStateOf(emptyList<AlbumPhotoUi>()) }
 
     var busy by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     var addPhotoSheetOpen by remember { mutableStateOf(false) }
+    var showFriendPicker by remember { mutableStateOf(false) }
 
     fun showError(msg: String) {
         errorMsg = msg
@@ -147,6 +156,23 @@ fun CreateAlbumScreen(
         )
     }
 
+    if (showFriendPicker && albumId != null) {
+        val currentAlbumId = albumId!!
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { showFriendPicker = false }
+        ) {
+            FriendPickerScreen(
+                albumId = currentAlbumId,
+                currentFriends = friends,
+                onBack = { showFriendPicker = false },
+                onFriendsAdded = { newFriends ->
+                    friends = friends + newFriends
+                    showFriendPicker = false
+                }
+            )
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -215,21 +241,10 @@ fun CreateAlbumScreen(
                 FriendsRow(
                     friends = friends,
                     onAddFriend = {
-                        if (busy) return@FriendsRow
-                        busy = true
-                        errorMsg = null
-
-                        scope.launch {
-                            try {
-                                // For now, just show a toast - you'll implement friend picker later
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Friend picker coming soon", Toast.LENGTH_SHORT).show()
-                                }
-                            } catch (e: Exception) {
-                                showError(e.message ?: "Failed to add member")
-                            } finally {
-                                busy = false
-                            }
+                        if (albumId != null) {
+                            showFriendPicker = true
+                        } else {
+                            showError("Create the album first")
                         }
                     }
                 )
