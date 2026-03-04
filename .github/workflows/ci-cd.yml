@@ -40,7 +40,7 @@ jobs:
       - name: Write .env file
         run: echo '${{ secrets.ENV_FILE }}' > ./server/.env
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./server
