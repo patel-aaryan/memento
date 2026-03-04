@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'server/**'
+  workflow_dispatch: {}
 
 jobs:
   deploy:
@@ -20,3 +21,5 @@ jobs:
           service_id: ${{ secrets.RENDER_SERVICE_ID }}
           api_key: ${{ secrets.RENDER_API_KEY }}
           wait_deploy: true
+          deployment_environment: production
+          github_token: ${{ secrets.GITHUB_TOKEN }}
