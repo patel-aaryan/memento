@@ -81,6 +81,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.google.firebase.messaging.FirebaseMessaging
+import com.example.mementoandroid.reminder.AnniversaryLocationWorker
 
 
 
@@ -145,6 +146,9 @@ class MainActivity : ComponentActivity() {
         }
         
         enableEdgeToEdge()
+        // Kick off the first anniversary location check; subsequent runs reschedule themselves
+        Log.d(TAG, "Scheduling first AnniversaryLocationWorker")
+        AnniversaryLocationWorker.scheduleNext(applicationContext)
         setContent {
             MementoAndroidTheme {
                 val context = LocalContext.current as ComponentActivity

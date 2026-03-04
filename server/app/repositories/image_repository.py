@@ -155,3 +155,32 @@ def get_album_images(db: Session, album_id: int) -> List[dict]:
     result = db.execute(query, {"album_id": album_id})
     return [_row_to_image_dict(row) for row in result]
 
+
+def get_user_images_with_location_on_date(
+    db: Session,
+    user_id: int,
+    target_date: str,
+) -> List[dict]:
+    """
+    Return all images for a user that have latitude/longitude and whose
+    (taken_at or date_added) falls on the given calendar date (YYYY-MM-DD).
+    """
+    query = text("""
+        SELECT id, album_id, caption, image_url, audio_url, latitude, longitude,
+               date_added, taken_at, user_id, created_at, updated_at
+        FROM images
+        WHERE user_id = :user_id
+          AND latitude IS NOT NULL
+          AND longitude IS NOT NULL
+          AND DATE(COALESCE(taken_at, date_added)) = :target_date
+    """)
+
+    result = db.execute(
+        query,
+        {
+            "user_id": user_id,
+            "target_date": target_date,
+        },
+    )
+    return [_row_to_image_dict(row) for row in result]
+
