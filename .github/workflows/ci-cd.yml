@@ -53,8 +53,4 @@ jobs:
 
     steps:
       - name: Deploy to Render
-        uses: JorgeLNJunior/render-deploy@v1.5.0
-        with:
-          service_id: ${{ secrets.RENDER_SERVICE_ID }}
-          api_key: ${{ secrets.RENDER_API_KEY }}
-          wait_deploy: true
+        run: curl "${{ secrets.DEPLOY_HOOK_URL }}"
