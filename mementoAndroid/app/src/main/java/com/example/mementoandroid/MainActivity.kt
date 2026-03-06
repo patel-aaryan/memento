@@ -76,6 +76,8 @@ import android.widget.Toast
 import android.os.Build
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material3.Switch
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -475,7 +477,10 @@ class MainActivity : ComponentActivity() {
                             onProfileClick = {
                                 startActivity(Intent(context, ProfileActivity::class.java))
                             },
-                            onAlbumClick = { selectedAlbumId = it }
+                            onAlbumClick = { selectedAlbumId = it },
+                            onMapsViewClick = {
+                                startActivity(Intent(context, MapActivity::class.java))
+                            }
                         )
                     }
                 }
@@ -490,7 +495,8 @@ fun HomeScreen(
     albums: List<AlbumUi>,
     modifier: Modifier = Modifier,
     onProfileClick: () -> Unit,
-    onAlbumClick: (Int) -> Unit = {}
+    onAlbumClick: (Int) -> Unit = {},
+    onMapsViewClick: () -> Unit,
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val filteredItems = remember(searchQuery, albums) {
@@ -512,6 +518,17 @@ fun HomeScreen(
                 content = {
                     Icon(
                         Icons.Default.Person,
+                        contentDescription = "Profile",
+                        Modifier.size(24.dp),
+                    )
+                },
+            )
+            FloatingActionButton(
+                onClick = {onMapsViewClick()},
+                modifier = Modifier.size(48.dp),
+                content = {
+                    Icon(
+                        Icons.Default.Map,
                         contentDescription = "Profile",
                         Modifier.size(24.dp),
                     )
@@ -584,7 +601,8 @@ fun HomeScreenPreview() {
     MementoAndroidTheme {
         HomeScreen(
             albums = emptyList(),
-            onProfileClick = {}
+            onProfileClick = {},
+            onMapsViewClick = {}
         )
     }
 }
