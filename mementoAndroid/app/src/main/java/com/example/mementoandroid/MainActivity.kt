@@ -478,9 +478,6 @@ class MainActivity : ComponentActivity() {
                                 startActivity(Intent(context, ProfileActivity::class.java))
                             },
                             onAlbumClick = { selectedAlbumId = it },
-                            onMapsViewClick = {
-                                startActivity(Intent(context, MapActivity::class.java))
-                            }
                         )
                     }
                 }
@@ -496,7 +493,6 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     onProfileClick: () -> Unit,
     onAlbumClick: (Int) -> Unit = {},
-    onMapsViewClick: () -> Unit,
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val filteredItems = remember(searchQuery, albums) {
@@ -518,17 +514,6 @@ fun HomeScreen(
                 content = {
                     Icon(
                         Icons.Default.Person,
-                        contentDescription = "Profile",
-                        Modifier.size(24.dp),
-                    )
-                },
-            )
-            FloatingActionButton(
-                onClick = {onMapsViewClick()},
-                modifier = Modifier.size(48.dp),
-                content = {
-                    Icon(
-                        Icons.Default.Map,
                         contentDescription = "Profile",
                         Modifier.size(24.dp),
                     )
@@ -601,8 +586,7 @@ fun HomeScreenPreview() {
     MementoAndroidTheme {
         HomeScreen(
             albums = emptyList(),
-            onProfileClick = {},
-            onMapsViewClick = {}
+            onProfileClick = {}
         )
     }
 }

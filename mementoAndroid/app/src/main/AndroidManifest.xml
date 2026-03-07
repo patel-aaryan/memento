@@ -54,11 +54,6 @@
             android:theme="@style/Theme.MementoAndroid">
         </activity>
         <activity
-            android:name=".MapActivity"
-            android:exported="true"
-            android:theme="@style/Theme.MementoAndroid">
-        </activity>
-        <activity
             android:name=".AddFriendActivity"
             android:exported="true"
             android:theme="@style/Theme.MementoAndroid">
