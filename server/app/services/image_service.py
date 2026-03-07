@@ -99,11 +99,11 @@ def update_image(db: Session, image_id: int, image_data: ImageUpdate, user_id: i
         return ImageResponse(**image)
     
     print(f"[image_service] update_image id={image_id} update_kwargs={update_kwargs}", flush=True)
-    # Update the image
+    # Update the image (pass dict so we can set optional fields to None, e.g. clear audio_url)
     updated_image = image_repository.update_image(
         db=db,
         image_id=image_id,
-        **update_kwargs
+        updates=update_kwargs
     )
     
     if not updated_image:
