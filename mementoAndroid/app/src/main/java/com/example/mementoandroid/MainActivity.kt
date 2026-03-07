@@ -76,6 +76,8 @@ import android.widget.Toast
 import android.os.Build
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material3.Switch
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -495,7 +497,7 @@ class MainActivity : ComponentActivity() {
                             onProfileClick = {
                                 startActivity(Intent(context, ProfileActivity::class.java))
                             },
-                            onAlbumClick = { selectedAlbumId = it }
+                            onAlbumClick = { selectedAlbumId = it },
                         )
                     }
                 }
@@ -510,7 +512,7 @@ fun HomeScreen(
     albums: List<AlbumUi>,
     modifier: Modifier = Modifier,
     onProfileClick: () -> Unit,
-    onAlbumClick: (Int) -> Unit = {}
+    onAlbumClick: (Int) -> Unit = {},
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val filteredItems = remember(searchQuery, albums) {
