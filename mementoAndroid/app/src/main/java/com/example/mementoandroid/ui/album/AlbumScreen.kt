@@ -13,6 +13,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import com.example.mementoandroid.ui.album.components.*
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.ViewList
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,6 +39,7 @@ fun AlbumScreen(
     var addPhotoSheetOpen by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editedName by remember(albumName, showEditDialog) { mutableStateOf(albumName) }
+    var showMap by remember{ mutableStateOf(false) }
 
     if (addPhotoSheetOpen) {
         AddPhotoBottomSheet(
@@ -87,6 +94,17 @@ fun AlbumScreen(
                 onEditAlbumName = { showEditDialog = true },
                 onDeleteAlbum = onDeleteAlbum
             )
+        },
+        // Map button
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showMap = !showMap }
+            ) {
+                Icon(
+                    imageVector = if (showMap) Icons.Default.GridView else Icons.Default.Map,
+                    contentDescription = if (showMap) "Show grid" else "Show map"
+                )
+            }
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
@@ -96,13 +114,19 @@ fun AlbumScreen(
                     onAddFriend = onAddFriend
                 )
             }
-
-            PhotoGrid(
-                photos = photos,
-                onPhotoClick = onPhotoClick,
-                onAddClick = { addPhotoSheetOpen = true },
-                modifier = Modifier.fillMaxSize()
-            )
+            if (showMap){
+                MapScreen(
+                    photos = photos,
+                    onPhotoClick = onPhotoClick
+                )
+            } else {
+                PhotoGrid(
+                    photos = photos,
+                    onPhotoClick = onPhotoClick,
+                    onAddClick = { addPhotoSheetOpen = true },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

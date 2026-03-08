@@ -6,6 +6,12 @@ plugins {
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin") version "2.0.1" apply false
 }
 
+val mapsApiKey: String = if (project.hasProperty("GOOGLE_MAPS_API_KEY")) {
+    project.property("GOOGLE_MAPS_API_KEY") as String
+} else {
+    "MISSING_API_KEY"
+}
+
 android {
     namespace = "com.example.mementoandroid"
     compileSdk {
@@ -20,6 +26,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
