@@ -23,7 +23,8 @@ data class AlbumPhotoUi(
 
 data class AlbumUi(
     val id: Int,
-    val name: String
+    val name: String,
+    val coverImageUrls: List<String> = emptyList()
 )
 
 data class FriendUi(

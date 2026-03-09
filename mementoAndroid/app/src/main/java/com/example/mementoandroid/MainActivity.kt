@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
                 var selectedAlbumId by rememberSaveable { mutableStateOf<Int?>(null) }
                 var selectedPhotoId by rememberSaveable { mutableStateOf<String?>(null) }
                 var albums by remember { mutableStateOf<List<AlbumUi>>(emptyList()) }
+                var currentUserProfilePictureUrl by remember { mutableStateOf<String?>(null) }
                 val photos = remember { mutableStateListOf<AlbumPhotoUi>() }
                 var albumMembers by remember { mutableStateOf<List<FriendUi>>(emptyList()) }
 
@@ -142,8 +143,23 @@ class MainActivity : ComponentActivity() {
                 var showCreateAlbum by rememberSaveable { mutableStateOf(false) }
                 var showFriendPicker by remember { mutableStateOf(false) }
                 var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
+                var albumShowMap by rememberSaveable { mutableStateOf(false) }
 
                 val scope = rememberCoroutineScope()
+
+                val profileLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) { _ ->
+                    scope.launch {
+                        val t = AuthTokenStore.get() ?: return@launch
+                        BackendClient.get("/auth/me", t)
+                            .onSuccess { j ->
+                                val url = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                withContext(Dispatchers.Main) { currentUserProfilePictureUrl = url }
+                            }
+                            .onFailure { handle401(context, it) }
+                    }
+                }
 
                 LaunchedEffect(Unit) {
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
@@ -155,11 +171,21 @@ class MainActivity : ComponentActivity() {
                             .onSuccess { Toast.makeText(context, "Friend added!", Toast.LENGTH_SHORT).show() }
                             .onFailure { handle401(context, it) }
                     }
+                    BackendClient.get("/auth/me", t)
+                        .onSuccess { j ->
+                            val url = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                            withContext(Dispatchers.Main) { currentUserProfilePictureUrl = url }
+                        }
+                        .onFailure { handle401(context, it) }
                     BackendClient.getArray("/albums", t)
                         .onSuccess { arr ->
                             val list = (0 until arr.length()).map { i ->
                                 val o = arr.getJSONObject(i)
-                                AlbumUi(o.getInt("id"), o.getString("name"))
+                                val coverUrls = if (o.has("cover_image_urls")) {
+                                    val a = o.getJSONArray("cover_image_urls")
+                                    (0 until a.length()).map { j -> a.getString(j) }
+                                } else emptyList()
+                                AlbumUi(o.getInt("id"), o.getString("name"), coverUrls)
                             }
                             withContext(Dispatchers.Main) { albums = list }
                         }
@@ -429,7 +455,11 @@ class MainActivity : ComponentActivity() {
                                             .onSuccess { arr ->
                                                 val list = (0 until arr.length()).map { i ->
                                                     val o = arr.getJSONObject(i)
-                                                    AlbumUi(o.getInt("id"), o.getString("name"))
+                                                    val coverUrls = if (o.has("cover_image_urls")) {
+                                                        val a = o.getJSONArray("cover_image_urls")
+                                                        (0 until a.length()).map { j -> a.getString(j) }
+                                                    } else emptyList()
+                                                    AlbumUi(o.getInt("id"), o.getString("name"), coverUrls)
                                                 }
                                                 withContext(Dispatchers.Main) {
                                                     albums = list
@@ -461,7 +491,11 @@ class MainActivity : ComponentActivity() {
                                             .onSuccess { arr ->
                                                 val list = (0 until arr.length()).map { i ->
                                                     val o = arr.getJSONObject(i)
-                                                    AlbumUi(o.getInt("id"), o.getString("name"))
+                                                    val coverUrls = if (o.has("cover_image_urls")) {
+                                                        val a = o.getJSONArray("cover_image_urls")
+                                                        (0 until a.length()).map { j -> a.getString(j) }
+                                                    } else emptyList()
+                                                    AlbumUi(o.getInt("id"), o.getString("name"), coverUrls)
                                                 }
                                                 withContext(Dispatchers.Main) { albums = list }
                                             }
@@ -568,6 +602,8 @@ class MainActivity : ComponentActivity() {
                             photos = photos,
                             friends = albumMembers,
                             isSharedAlbum = albumMembers.isNotEmpty(),
+                            showMap = albumShowMap,
+                            onShowMapChange = { albumShowMap = it },
                             onBack = { selectedAlbumId = null },
                             onEditAlbumName = {},
                             onSaveAlbumName = { newName ->
@@ -603,7 +639,8 @@ class MainActivity : ComponentActivity() {
                     else -> {
                         HomeScreen(
                             albums = albums,
-                            onProfileClick = { startActivity(Intent(context, ProfileActivity::class.java)) },
+                            profilePictureUrl = currentUserProfilePictureUrl,
+                            onProfileClick = { profileLauncher.launch(Intent(context, ProfileActivity::class.java)) },
                             onAlbumClick = { selectedAlbumId = it },
                             onAction = ::onHomeAction
                         )

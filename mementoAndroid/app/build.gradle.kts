@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,10 +8,13 @@ plugins {
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin") version "2.0.1" apply false
 }
 
+val localProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.let { load(it) }
+}
 val mapsApiKey: String = if (project.hasProperty("GOOGLE_MAPS_API_KEY")) {
     project.property("GOOGLE_MAPS_API_KEY") as String
 } else {
-    "MISSING_API_KEY"
+    localProperties.getProperty("GOOGLE_MAPS_API_KEY") ?: "MISSING_API_KEY"
 }
 
 android {

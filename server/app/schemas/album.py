@@ -17,6 +17,7 @@ class AlbumResponse(BaseModel):
     owner_id: int
     created_at: str
     updated_at: str
+    cover_image_urls: Optional[List[str]] = []
 
     class Config:
         from_attributes = True

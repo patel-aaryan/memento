@@ -156,6 +156,18 @@ def get_album_images(db: Session, album_id: int) -> List[dict]:
     return [_row_to_image_dict(row) for row in result]
 
 
+def get_album_cover_urls(db: Session, album_id: int, limit: int = 4) -> List[str]:
+    """Get first N image URLs for an album (for cover/thumbnail)."""
+    query = text("""
+        SELECT image_url FROM images
+        WHERE album_id = :album_id
+        ORDER BY date_added DESC
+        LIMIT :limit
+    """)
+    result = db.execute(query, {"album_id": album_id, "limit": limit})
+    return [row[0] for row in result]
+
+
 def get_user_images_with_location_on_date(
     db: Session,
     user_id: int,

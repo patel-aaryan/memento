@@ -1,7 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from app.repositories import album_repository, album_member_repository
+from app.repositories import album_repository, album_member_repository, image_repository
 from app.repositories.user_repository import get_users_by_ids
 from app.schemas.album import AlbumCreate, AlbumUpdate, AlbumResponse, AlbumMemberAdd
 from app.schemas.auth import UserResponse
@@ -100,9 +100,13 @@ def delete_album(db: Session, album_id: int, user_id: int) -> None:
 
 
 def get_user_albums(db: Session, user_id: int) -> List[AlbumResponse]:
-    """Get all albums for a user (owned or member)."""
+    """Get all albums for a user (owned or member), with cover image URLs."""
     albums = album_repository.get_user_albums(db, user_id)
-    return [AlbumResponse(**album) for album in albums]
+    result = []
+    for album in albums:
+        cover_urls = image_repository.get_album_cover_urls(db, album["id"], limit=4)
+        result.append(AlbumResponse(cover_image_urls=cover_urls, **album))
+    return result
 
 
 def add_album_member(db: Session, album_id: int, member_data: AlbumMemberAdd, user_id: int) -> dict:

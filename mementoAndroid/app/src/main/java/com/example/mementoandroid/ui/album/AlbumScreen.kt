@@ -27,6 +27,8 @@ fun AlbumScreen(
     photos: List<AlbumPhotoUi>,
     friends: List<FriendUi>,
     isSharedAlbum: Boolean,
+    showMap: Boolean,
+    onShowMapChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     onEditAlbumName: () -> Unit,
     onSaveAlbumName: (newName: String) -> Unit = {},
@@ -39,7 +41,6 @@ fun AlbumScreen(
     var addPhotoSheetOpen by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editedName by remember(albumName, showEditDialog) { mutableStateOf(albumName) }
-    var showMap by remember{ mutableStateOf(false) }
 
     if (addPhotoSheetOpen) {
         AddPhotoBottomSheet(
@@ -98,7 +99,7 @@ fun AlbumScreen(
         // Map button
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showMap = !showMap }
+                onClick = { onShowMapChange(!showMap) }
             ) {
                 Icon(
                     imageVector = if (showMap) Icons.Default.GridView else Icons.Default.Map,

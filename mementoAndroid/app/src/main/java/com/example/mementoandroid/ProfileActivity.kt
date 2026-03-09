@@ -1,7 +1,5 @@
 package com.example.mementoandroid
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
@@ -14,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -255,15 +255,14 @@ class ProfileActivity : ComponentActivity() {
                                 val link = j.optString("link", "")
                                 withContext(Dispatchers.Main) {
                                     if (link.isNotBlank()) {
-                                        val clipboard = context.getSystemService(ClipboardManager::class.java)
-                                        clipboard?.setPrimaryClip(
-                                            ClipData.newPlainText("Friend link", link)
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, link)
+                                            putExtra(Intent.EXTRA_SUBJECT, "Add me on Memento")
+                                        }
+                                        context.startActivity(
+                                            Intent.createChooser(shareIntent, "Share friend link")
                                         )
-                                        Toast.makeText(
-                                            context,
-                                            "Friend link copied to clipboard",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
                                     } else {
                                         Toast.makeText(
                                             context,
@@ -289,6 +288,14 @@ class ProfileActivity : ComponentActivity() {
                     }
                 }
 
+                fun logout() {
+                    AuthTokenStore.clear()
+                    startActivity(Intent(context, LoginActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                    })
+                    finish()
+                }
+
                 ProfileScreen(
                     user = user,
                     friends = friends,
@@ -296,7 +303,8 @@ class ProfileActivity : ComponentActivity() {
                     onProfilePictureClick = { addPhotoSheetOpen = true },
                     onSaveName = ::saveName,
                     onGetFriendLink = ::getFriendLink,
-                    onAddFriendByEmail = ::addFriendByEmail
+                    onAddFriendByEmail = ::addFriendByEmail,
+                    onLogout = ::logout
                 )
             }
         }
@@ -312,12 +320,14 @@ fun ProfileScreen(
     onProfilePictureClick: () -> Unit,
     onSaveName: ((String) -> Unit)? = null,
     onGetFriendLink: (() -> Unit)? = null,
-    onAddFriendByEmail: ((String) -> Unit)? = null
+    onAddFriendByEmail: ((String) -> Unit)? = null,
+    onLogout: (() -> Unit)? = null
 ) {
     val profileName = user?.name ?: "Loading..."
     val profileEmail = user?.email ?: ""
     val profilePictureUrl = user?.profilePictureUrl
     var showNameDialog by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
     var darkModeEnabled by remember { mutableStateOf(false) }
     var friendEmail by remember { mutableStateOf("") }
@@ -337,6 +347,7 @@ fun ProfileScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(paddingValues)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -541,8 +552,41 @@ fun ProfileScreen(
                         }
                     }
                 }
+
+                if (onLogout != null) {
+                    Spacer(modifier = Modifier.height(32.dp))
+                    OutlinedButton(
+                        onClick = { showLogoutDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Log out")
+                    }
+                }
             }
         }
+    }
+
+    if (showLogoutDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Log out") },
+            text = { Text("Are you sure you want to log out?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutDialog = false
+                        onLogout?.invoke()
+                    }
+                ) {
+                    Text("Yes", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showNameDialog && user != null) {
