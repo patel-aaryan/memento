@@ -1,11 +1,13 @@
 import logging
 import requests
-from typing import Optional
+from typing import Any, Optional
 from app.config.settings import get_settings
 
 
 logger = logging.getLogger(__name__)
 PLACES_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+PLACES_AUTOCOMPLETE_URL = "https://places.googleapis.com/v1/places:autocomplete"
+PLACES_DETAILS_BASE = "https://places.googleapis.com/v1/places"
 
 
 def nearest_place_display_name(
@@ -57,6 +59,74 @@ def nearest_place_display_name(
     display = places[0].get("displayName") or {}
     logger.info(places[0])
     return display.get("text")
+
+
+def _get_api_key() -> str:
+    settings = get_settings()
+    key = settings.google_api_key
+    if not key:
+        raise RuntimeError("Missing API key. Set GOOGLE_API_KEY in your environment.")
+    return key
+
+
+def autocomplete_places(input_text: str, *, api_key: Optional[str] = None) -> list[dict[str, Any]]:
+    """
+    Returns place suggestions for the given input using Places API Autocomplete (New).
+    Each item is {"description": str, "place_id": str}.
+    """
+    api_key = api_key or _get_api_key()
+    if not input_text or not input_text.strip():
+        return []
+
+    body = {"input": input_text.strip()}
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "suggestions.placePrediction.text,suggestions.placePrediction.placeId",
+    }
+    resp = requests.post(PLACES_AUTOCOMPLETE_URL, json=body, headers=headers, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+
+    out = []
+    for s in data.get("suggestions", []):
+        pred = s.get("placePrediction") or {}
+        place_id = pred.get("placeId")
+        text_obj = pred.get("text") or {}
+        description = (text_obj.get("text") or "").strip()
+        if place_id and description:
+            out.append({"description": description, "place_id": place_id})
+    return out
+
+
+def get_place_details(place_id: str, *, api_key: Optional[str] = None) -> dict[str, Any]:
+    """
+    Returns latitude, longitude, and display name for a place using Place Details (New).
+    Returns {"latitude": float, "longitude": float, "display_name": str}.
+    """
+    api_key = api_key or _get_api_key()
+    if not place_id or not place_id.strip():
+        raise ValueError("place_id is required")
+
+    place_id = place_id.strip()
+    url = f"{PLACES_DETAILS_BASE}/{place_id}"
+    headers = {
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "location,displayName",
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+
+    loc = data.get("location") or {}
+    lat = loc.get("latitude")
+    lng = loc.get("longitude")
+    display = data.get("displayName") or {}
+    display_name = (display.get("text") or "").strip()
+
+    if lat is None or lng is None:
+        raise ValueError("Place has no location (latitude/longitude)")
+    return {"latitude": float(lat), "longitude": float(lng), "display_name": display_name or None}
 
 # Test API
 # if __name__ == "__main__":

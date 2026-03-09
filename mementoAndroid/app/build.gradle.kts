@@ -3,6 +3,13 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin") version "2.0.1" apply false
+}
+
+val mapsApiKey: String = if (project.hasProperty("GOOGLE_MAPS_API_KEY")) {
+    project.property("GOOGLE_MAPS_API_KEY") as String
+} else {
+    "MISSING_API_KEY"
 }
 
 android {
@@ -19,6 +26,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = mapsApiKey
     }
 
     buildTypes {
@@ -39,6 +47,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -56,6 +65,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.exifinterface)
     implementation(libs.okhttp)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.play.services.location)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -66,4 +77,6 @@ dependencies {
     implementation(platform(libs.google.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.messaging)
+    implementation(libs.play.services.maps)
+    implementation(libs.maps.compose)
 }

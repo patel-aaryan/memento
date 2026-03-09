@@ -56,6 +56,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import android.util.Log
+import android.widget.Toast
+import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material3.Switch
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.google.firebase.messaging.FirebaseMessaging
+import com.example.mementoandroid.reminder.AnniversaryLocationWorker
+
 
 
 private const val TAG = "MainActivity"
@@ -119,6 +133,9 @@ class MainActivity : ComponentActivity() {
         }
 
         enableEdgeToEdge()
+        // Kick off the first anniversary location check; subsequent runs reschedule themselves
+        Log.d(TAG, "Scheduling first AnniversaryLocationWorker")
+        AnniversaryLocationWorker.scheduleNext(applicationContext)
         setContent {
             MementoAndroidTheme {
                 val context = LocalContext.current as ComponentActivity
@@ -223,7 +240,7 @@ class MainActivity : ComponentActivity() {
                                     AlbumPhotoUi(
                                         id = o.getInt("id").toString(),
                                         imageUrl = o.getString("image_url"),
-                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() && it != "null" },
                                         caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                         latitude = lat,
                                         longitude = lon,
@@ -475,6 +492,22 @@ class MainActivity : ComponentActivity() {
                                 albumName = albumName,
                                 mock = getPhotoDetailMock(albumName, photoToDelete.id),
                                 onBack = { selectedPhotoId = null },
+                                onDeleteAudio = {
+                                    scope.launch {
+                                        val t = AuthTokenStore.get() ?: return@launch
+                                        val body = JSONObject().put("audio_url", JSONObject.NULL)
+                                        val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                        withContext(Dispatchers.Main) {
+                                            result.onFailure { handle401(context, it) }
+                                            if (result.isSuccess) loadAlbumImages()
+                                            Toast.makeText(
+                                                context,
+                                                if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                },
                                 onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
                                     scope.launch {
                                         val t = AuthTokenStore.get() ?: return@launch

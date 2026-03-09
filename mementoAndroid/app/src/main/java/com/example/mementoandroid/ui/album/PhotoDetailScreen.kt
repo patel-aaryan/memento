@@ -76,6 +76,9 @@ import coil.compose.AsyncImage
 import androidx.compose.foundation.Image
 import android.util.Log
 import com.example.mementoandroid.api.BackendClient
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import org.json.JSONArray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,6 +89,7 @@ fun PhotoDetailScreen(
     onBack: () -> Unit,
     onSave: (caption: String, takenAt: String?, latitude: Double?, longitude: Double?, audioFilePath: String?) -> Unit = { _, _, _, _, _ -> },
     onDeletePhoto: () -> Unit = {},
+    onDeleteAudio: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -97,8 +101,11 @@ fun PhotoDetailScreen(
     var displayedLocation by remember(photo.id) { mutableStateOf(mock.location) }
     var isEditMode by remember(photo.id) { mutableStateOf(false) }
     var editedTakenAt by remember(photo.id) { mutableStateOf(photo.takenAt ?: "") }
-    // Location search text — for future Google Maps Places autocomplete; selection will provide new lat/lng
+    // Location search text; autocomplete suggestions and selected lat/lng for save
     var editedLocationText by remember(photo.id) { mutableStateOf("") }
+    var locationSuggestions by remember(photo.id) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var editedLatitude by remember(photo.id) { mutableStateOf<Double?>(null) }
+    var editedLongitude by remember(photo.id) { mutableStateOf<Double?>(null) }
     var recordedAudioPath by remember(photo.id) { mutableStateOf<String?>(null) }
     var isRecording by remember(photo.id) { mutableStateOf(false) }
     var isPlaying by remember(photo.id) { mutableStateOf(false) }
@@ -186,6 +193,37 @@ fun PhotoDetailScreen(
         if (displayedDateTime == mock.dateTime) {
             formatBackendDateTime(photo.takenAt)?.let { displayedDateTime = it }
                 ?: formatBackendDateTime(photo.dateAdded)?.let { displayedDateTime = it }
+        }
+    }
+
+    // Debounced autocomplete when user types in location search (edit mode)
+    LaunchedEffect(isEditMode, editedLocationText) {
+        if (!isEditMode || editedLocationText.isBlank()) {
+            withContext(Dispatchers.Main) { locationSuggestions = emptyList() }
+            return@LaunchedEffect
+        }
+        delay(300)
+        val query = editedLocationText
+        val path = "/location/autocomplete?q=${URLEncoder.encode(query, StandardCharsets.UTF_8.name())}"
+        Log.d("PhotoDetailScreen", "Calling autocomplete: $path")
+        val result = BackendClient.get(path)
+        withContext(Dispatchers.Main) {
+            result.onSuccess { json ->
+                val arr = json.optJSONArray("predictions") ?: JSONArray()
+                val list = (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val desc = o.optString("description", "")
+                    val placeId = o.optString("place_id", "")
+                    if (desc.isNotBlank() && placeId.isNotBlank()) Pair(desc, placeId) else null
+                }
+                if (editedLocationText == query) {
+                    Log.d("PhotoDetailScreen", "Autocomplete returned ${list.size} suggestions")
+                    locationSuggestions = list
+                }
+            }.onFailure { e ->
+                Log.w("PhotoDetailScreen", "Autocomplete failed", e)
+                if (editedLocationText == query) locationSuggestions = emptyList()
+            }
         }
     }
 
@@ -328,7 +366,7 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Location (editable in edit mode — search/select; lat/lng from upload metadata are kept until user selects a new place via future Google Maps integration)
+                // Location (editable in edit mode — search with Google Places autocomplete dropdown)
                 if (isEditMode) {
                     Text(
                         text = "Location",
@@ -341,9 +379,47 @@ fun PhotoDetailScreen(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         placeholder = { Text("Search for a location (e.g. city or address)") }
-                        // TODO: Hook up Google Maps Places Autocomplete — use editedLocationText as query,
-                        // show suggestions, on selection get lat/lng and pass to onSave so backend is updated.
                     )
+                    if (locationSuggestions.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(4.dp)) {
+                                locationSuggestions.forEach { (description, placeId) ->
+                                    Text(
+                                        text = description,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                scope.launch {
+                                                    val detailsPath = "/location/place-details?place_id=${URLEncoder.encode(placeId, StandardCharsets.UTF_8.name())}"
+                                                    BackendClient.get(detailsPath).onSuccess { details ->
+                                                        val lat = details.optDouble("latitude", Double.NaN)
+                                                        val lng = details.optDouble("longitude", Double.NaN)
+                                                        val name = details.optString("display_name", "").takeIf { it.isNotBlank() } ?: description
+                                                        if (!lat.isNaN() && !lng.isNaN()) {
+                                                            editedLatitude = lat
+                                                            editedLongitude = lng
+                                                            displayedLocation = name
+                                                            editedLocationText = name
+                                                            locationSuggestions = emptyList()
+                                                        }
+                                                    }.onFailure { e ->
+                                                        Log.w("PhotoDetailScreen", "Place details failed", e)
+                                                        locationSuggestions = emptyList()
+                                                    }
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } else if (displayedLocation != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -385,9 +461,9 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Audio recording or persisted voice note (underneath location)
-                val hasLocalRecording = recordedAudioPath != null
-                val hasPersistedAudio = photo.audioUrl != null
+                // Audio: only "has recording" when we have real local or persisted URL (not blank/"null")
+                val hasLocalRecording = !recordedAudioPath.isNullOrBlank()
+                val hasPersistedAudio = !photo.audioUrl.isNullOrBlank() && photo.audioUrl != "null"
                 val hasRecording = hasLocalRecording || hasPersistedAudio
                 Card(
                     modifier = Modifier
@@ -404,12 +480,14 @@ fun PhotoDetailScreen(
                                         mediaPlayer = null
                                         isPlaying = false
                                     } else {
-                                        mediaPlayerHolder.current?.release()
-                                        mediaPlayerHolder.current = null
                                         val dataSource = when {
                                             hasLocalRecording -> recordedAudioPath!!
-                                            else -> photo.audioUrl!!
+                                            hasPersistedAudio -> photo.audioUrl!!
+                                            else -> null
                                         }
+                                        if (dataSource.isNullOrBlank()) return@clickable
+                                        mediaPlayerHolder.current?.release()
+                                        mediaPlayerHolder.current = null
                                         val player = MediaPlayer().apply {
                                             setAudioAttributes(
                                                 AudioAttributes.Builder()
@@ -487,6 +565,19 @@ fun PhotoDetailScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            // In edit mode, allow deleting audio when there is one
+                            if (isEditMode && hasRecording) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Delete audio",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.clickable {
+                                        recordedAudioPath = null
+                                        onDeleteAudio()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -514,15 +605,14 @@ fun PhotoDetailScreen(
                         scope.launch {
                             delay(150)
                             val takenAt = editedTakenAt.takeIf { it.isNotBlank() }
-                            // When Google Maps Places is integrated: get lat/lng from selected place and pass here
-                            val lat: Double? = null
-                            val lng: Double? = null
+                            val lat = editedLatitude ?: photo.latitude
+                            val lng = editedLongitude ?: photo.longitude
                             withContext(Dispatchers.Main) {
                                 onSave(notesText, takenAt, lat, lng, recordedAudioPath)
                                 if (isEditMode) {
                                     isEditMode = false
                                     if (takenAt != null) displayedDateTime = formatBackendDateTime(takenAt) ?: takenAt
-                                    if (lat != null && lng != null) displayedLocation = formatPhotoMetadataLocation(lat, lng)
+                                    if (lat != null && lng != null) displayedLocation = displayedLocation ?: formatPhotoMetadataLocation(lat, lng)
                                 }
                             }
                         }
