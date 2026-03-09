@@ -108,12 +108,10 @@ fun AlbumScreen(
         }
     ) { paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
-            if (isSharedAlbum) {
-                FriendsRow(
-                    friends = friends,
-                    onAddFriend = onAddFriend
-                )
-            }
+            FriendsRow(
+                friends = friends,
+                onAddFriend = onAddFriend
+            )
             if (showMap){
                 MapScreen(
                     photos = photos,
