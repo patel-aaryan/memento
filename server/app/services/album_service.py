@@ -7,6 +7,24 @@ from app.schemas.album import AlbumCreate, AlbumUpdate, AlbumResponse, AlbumMemb
 from app.schemas.auth import UserResponse
 
 
+PERSONAL_ALBUM_NAME = "My Photos"
+
+
+def get_or_create_personal_album(db: Session, user_id: int) -> dict:
+    """Get or create the user's personal album (for homepage/standalone photo uploads)."""
+    album = album_repository.get_album_by_owner_and_name(db, user_id, PERSONAL_ALBUM_NAME)
+    if album:
+        return album
+    album = album_repository.create_album(db, PERSONAL_ALBUM_NAME, user_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create personal album",
+        )
+    album_member_repository.add_album_member(db, album["id"], user_id)
+    return album
+
+
 def create_album(db: Session, album_data: AlbumCreate, owner_id: int) -> AlbumResponse:
     """Create a new album and add owner as a member."""
     # Create the album
@@ -166,6 +184,32 @@ def remove_album_member(db: Session, album_id: int, member_user_id: int, user_id
         )
     
     success = album_member_repository.remove_album_member(db, album_id, member_user_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Member not found in album"
+        )
+
+
+def leave_album(db: Session, album_id: int, user_id: int) -> None:
+    """Remove the current user from an album (leave). Owner cannot leave."""
+    album = album_repository.get_album_by_id(db, album_id)
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found"
+        )
+    if album["owner_id"] == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Album owner cannot leave; delete the album to remove it for everyone"
+        )
+    if not album_member_repository.is_album_member(db, album_id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="You are not a member of this album"
+        )
+    success = album_member_repository.remove_album_member(db, album_id, user_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

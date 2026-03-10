@@ -6,9 +6,12 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,10 +34,15 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CardDefaults
@@ -44,7 +52,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,18 +66,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalFocusManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Calendar
+import com.example.mementoandroid.util.buildIsoFromDateAndTime
 import com.example.mementoandroid.util.extractPhotoMetadata
-import com.example.mementoandroid.util.recordAudioToCache
 import com.example.mementoandroid.util.formatBackendDateTime
+import com.example.mementoandroid.util.formatDateMillis
 import com.example.mementoandroid.util.formatPhotoMetadataDateTime
 import com.example.mementoandroid.util.formatPhotoMetadataLocation
+import com.example.mementoandroid.util.formatTime
+import com.example.mementoandroid.util.parseIsoToHourMinute
+import com.example.mementoandroid.util.parseIsoToMillis
+import com.example.mementoandroid.util.recordAudioToCache
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import android.widget.Toast
@@ -90,6 +111,11 @@ fun PhotoDetailScreen(
     onSave: (caption: String, takenAt: String?, latitude: Double?, longitude: Double?, audioFilePath: String?) -> Unit = { _, _, _, _, _ -> },
     onDeletePhoto: () -> Unit = {},
     onDeleteAudio: () -> Unit = {},
+    canDeletePhoto: Boolean = false,
+    canEditPhoto: Boolean = canDeletePhoto,
+    allPhotos: List<AlbumPhotoUi>? = null,
+    currentPhotoIndex: Int = 0,
+    onPhotoIndexChange: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -106,6 +132,13 @@ fun PhotoDetailScreen(
     var locationSuggestions by remember(photo.id) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var editedLatitude by remember(photo.id) { mutableStateOf<Double?>(null) }
     var editedLongitude by remember(photo.id) { mutableStateOf<Double?>(null) }
+    var isEditingLocation by remember(photo.id) { mutableStateOf(false) }
+    var isEditingTimestamp by remember(photo.id) { mutableStateOf(false) }
+    var showDatePickerDialog by remember(photo.id) { mutableStateOf(false) }
+    var showTimePickerDialog by remember(photo.id) { mutableStateOf(false) }
+    var pendingDateMillis by remember(photo.id) { mutableStateOf<Long?>(null) }
+    var pendingHour by remember(photo.id) { mutableStateOf<Int?>(null) }
+    var pendingMinute by remember(photo.id) { mutableStateOf<Int?>(null) }
     var recordedAudioPath by remember(photo.id) { mutableStateOf<String?>(null) }
     var isRecording by remember(photo.id) { mutableStateOf(false) }
     var isPlaying by remember(photo.id) { mutableStateOf(false) }
@@ -196,6 +229,22 @@ fun PhotoDetailScreen(
         }
     }
 
+    LaunchedEffect(isEditMode) {
+        if (isEditMode) {
+            val millis = parseIsoToMillis(photo.takenAt)
+            pendingDateMillis = millis ?: System.currentTimeMillis()
+            val hm = parseIsoToHourMinute(photo.takenAt)
+            if (hm != null) {
+                pendingHour = hm.first
+                pendingMinute = hm.second
+            } else {
+                val cal = Calendar.getInstance()
+                pendingHour = cal.get(Calendar.HOUR_OF_DAY)
+                pendingMinute = cal.get(Calendar.MINUTE)
+            }
+        }
+    }
+
     // Debounced autocomplete when user types in location search (edit mode)
     LaunchedEffect(isEditMode, editedLocationText) {
         if (!isEditMode || editedLocationText.isBlank()) {
@@ -238,63 +287,112 @@ fun PhotoDetailScreen(
                     }
                 },
                 actions = {
-                    Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(if (isEditMode) "Done" else "Edit") },
-                                onClick = {
-                                    menuExpanded = false
-                                    if (isEditMode) {
-                                        isEditMode = false
-                                    } else {
-                                        editedTakenAt = photo.takenAt ?: ""
-                                        editedLocationText = displayedLocation ?: ""
-                                        isEditMode = true
-                                    }
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (isEditMode) Icons.Default.Check else Icons.Default.Edit,
-                                        contentDescription = null
+                    if (canEditPhoto || canDeletePhoto) {
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                if (canEditPhoto && !isEditMode) {
+                                    DropdownMenuItem(
+                                        text = { Text("Edit") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            editedTakenAt = photo.takenAt ?: ""
+                                            editedLocationText = displayedLocation?.takeIf { it.isNotBlank() }
+                                                ?: if (photo.latitude != null && photo.longitude != null)
+                                                    "${photo.latitude}, ${photo.longitude}"
+                                                else ""
+                                            isEditingTimestamp = false
+                                            isEditingLocation = false
+                                            isEditMode = true
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Edit, contentDescription = null)
+                                        }
                                     )
                                 }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Delete") },
-                                onClick = {
-                                    menuExpanded = false
-                                    onDeletePhoto()
-                                },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                if (canDeletePhoto) {
+                                    DropdownMenuItem(
+                                        text = { Text("Delete") },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onDeletePhoto()
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Delete, contentDescription = null)
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
                 }
             )
         }
     ) { paddingValues ->
+        val layoutDirection = LocalLayoutDirection.current
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
+                .padding(
+                    top = 84.dp,
+                    start = paddingValues.calculateStartPadding(layoutDirection),
+                    end = paddingValues.calculateEndPadding(layoutDirection),
+                    bottom = paddingValues.calculateBottomPadding()
+                )
                 .verticalScroll(rememberScrollState())
         ) {
-            // Top padding so image and content sit centered / just below center
-            Spacer(modifier = Modifier.height(32.dp))
+//            Spacer(modifier = Modifier.height(32.dp))
+            // Up arrow: above photo (when multiple photos)
+            if (allPhotos != null && allPhotos.size > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    IconButton(
+                        onClick = {
+                            val prev = (currentPhotoIndex - 1).coerceAtLeast(0)
+                            if (prev != currentPhotoIndex) onPhotoIndexChange(prev)
+                        },
+                        enabled = currentPhotoIndex > 0
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Previous photo",
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
+                }
+            }
 
-            // Main image — full width
+            // Main image — full width; swipe up/down for next/prev when multiple photos; arrows at top/bottom center
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(320.dp)
+                    .then(
+                        if (allPhotos != null && allPhotos.size > 1) {
+                            Modifier.pointerInput(allPhotos.size, currentPhotoIndex) {
+                                var totalDrag = 0f
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    totalDrag += dragAmount
+                                    if (totalDrag > 120f) {
+                                        totalDrag = 0f
+                                        val next = (currentPhotoIndex + 1).coerceAtMost(allPhotos.size - 1)
+                                        if (next != currentPhotoIndex) onPhotoIndexChange(next)
+                                    } else if (totalDrag < -120f) {
+                                        totalDrag = 0f
+                                        val prev = (currentPhotoIndex - 1).coerceAtLeast(0)
+                                        if (prev != currentPhotoIndex) onPhotoIndexChange(prev)
+                                    }
+                                }
+                            }
+                        } else Modifier
+                    )
             ) {
                 when {
                     photo.imageUrl != null -> AsyncImage(
@@ -324,29 +422,253 @@ fun PhotoDetailScreen(
                 }
             }
 
-            // Metadata section: Date → Location → Audio → Notes
+            // Date picker and time picker dialogs (edit mode)
+            if (showDatePickerDialog) {
+                val datePickerState = rememberDatePickerState(
+                    initialSelectedDateMillis = pendingDateMillis ?: System.currentTimeMillis()
+                )
+                DatePickerDialog(
+                    onDismissRequest = { showDatePickerDialog = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            datePickerState.selectedDateMillis?.let { pendingDateMillis = it }
+                            showDatePickerDialog = false
+                        }) {
+                            Text("OK")
+                        }
+                    }
+                ) {
+                    DatePicker(state = datePickerState)
+                }
+            }
+            if (showTimePickerDialog) {
+                val timePickerState = rememberTimePickerState(
+                    initialHour = pendingHour ?: Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
+                    initialMinute = pendingMinute ?: Calendar.getInstance().get(Calendar.MINUTE),
+                    is24Hour = false
+                )
+                AlertDialog(
+                    onDismissRequest = { showTimePickerDialog = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            pendingHour = timePickerState.hour
+                            pendingMinute = timePickerState.minute
+                            showTimePickerDialog = false
+                        }) {
+                            Text("OK")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showTimePickerDialog = false }) {
+                            Text("Cancel")
+                        }
+                    },
+                    text = {
+                        TimePicker(state = timePickerState)
+                    }
+                )
+            }
+
+            // Metadata section: same structure as Add to Memento (Location → Date & time → Voice → Caption)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp)
-                    .padding(top = 20.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(top = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Date & time (editable in edit mode)
                 if (isEditMode) {
-                    Text(
-                        text = "Date & time",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = editedTakenAt,
-                        onValueChange = { editedTakenAt = it },
+                    // Edit mode: Location card (Add-to-Memento style)
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text("e.g. 2025-01-15T14:30:00") }
-                    )
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            if (isEditingLocation) {
+                                Text(
+                                    text = "Location",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = editedLocationText,
+                                    onValueChange = { editedLocationText = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    placeholder = { Text("Search for a location (e.g. city or address)") }
+                                )
+                                if (locationSuggestions.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    locationSuggestions.forEach { (description, placeId) ->
+                                        Text(
+                                            text = description,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    scope.launch {
+                                                        val detailsPath = "/location/place-details?place_id=${URLEncoder.encode(placeId, StandardCharsets.UTF_8.name())}"
+                                                        BackendClient.get(detailsPath).onSuccess { details ->
+                                                            val lat = details.optDouble("latitude", Double.NaN)
+                                                            val lng = details.optDouble("longitude", Double.NaN)
+                                                            val name = details.optString("display_name", "").takeIf { it.isNotBlank() } ?: description
+                                                            if (!lat.isNaN() && !lng.isNaN()) {
+                                                                editedLatitude = lat
+                                                                editedLongitude = lng
+                                                                editedLocationText = name
+                                                                locationSuggestions = emptyList()
+                                                                isEditingLocation = false
+                                                            }
+                                                        }.onFailure { e ->
+                                                            Log.w("PhotoDetailScreen", "Place details failed", e)
+                                                            locationSuggestions = emptyList()
+                                                        }
+                                                    }
+                                                }
+                                                .padding(vertical = 8.dp)
+                                        )
+                                    }
+                                }
+                                TextButton(onClick = { isEditingLocation = false }) {
+                                    Text("Done")
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = editedLocationText.ifBlank { "Location not available" },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (editedLocationText.isNotBlank())
+                                                "Location not quite right? Click to edit"
+                                            else
+                                                "Manually add location",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable {
+                                                isEditingLocation = true
+                                                if (editedLocationText.isBlank()) {
+                                                    editedLocationText = displayedLocation ?: ""
+                                                    editedLatitude = photo.latitude
+                                                    editedLongitude = photo.longitude
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Edit mode: Date & time card — collapsed by default ("Timestamp not quite right? Click to edit"), expand to pickers on click
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            if (isEditingTimestamp) {
+                                Text(
+                                    text = "Date & time",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = pendingDateMillis?.let { formatDateMillis(it) } ?: "No date set",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    TextButton(onClick = { showDatePickerDialog = true }) {
+                                        Text("Change date")
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    val h = pendingHour ?: 0
+                                    val m = pendingMinute ?: 0
+                                    Text(
+                                        text = formatTime(h, m),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    TextButton(onClick = { showTimePickerDialog = true }) {
+                                        Text("Change time")
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(onClick = {
+                                    isEditingTimestamp = false
+                                }) {
+                                    Text("Done")
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Schedule,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val timestampText = pendingDateMillis?.let { millis ->
+                                            val h = pendingHour ?: 0
+                                            val m = pendingMinute ?: 0
+                                            "${formatDateMillis(millis)} · ${formatTime(h, m)}"
+                                        } ?: "Timestamp not available"
+                                        Text(
+                                            text = timestampText,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (pendingDateMillis != null)
+                                                "Timestamp not quite right? Click to edit"
+                                            else
+                                                "Manually add timestamp",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.clickable {
+                                                isEditingTimestamp = true
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
+                    // View mode: simple rows (no cards), same as before
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -364,79 +686,25 @@ fun PhotoDetailScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                }
 
-                // Location (editable in edit mode — search with Google Places autocomplete dropdown)
-                if (isEditMode) {
-                    Text(
-                        text = "Location",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = editedLocationText,
-                        onValueChange = { editedLocationText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        placeholder = { Text("Search for a location (e.g. city or address)") }
-                    )
-                    if (locationSuggestions.isNotEmpty()) {
-                        Card(
+                    if (displayedLocation != null) {
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(modifier = Modifier.padding(4.dp)) {
-                                locationSuggestions.forEach { (description, placeId) ->
-                                    Text(
-                                        text = description,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                scope.launch {
-                                                    val detailsPath = "/location/place-details?place_id=${URLEncoder.encode(placeId, StandardCharsets.UTF_8.name())}"
-                                                    BackendClient.get(detailsPath).onSuccess { details ->
-                                                        val lat = details.optDouble("latitude", Double.NaN)
-                                                        val lng = details.optDouble("longitude", Double.NaN)
-                                                        val name = details.optString("display_name", "").takeIf { it.isNotBlank() } ?: description
-                                                        if (!lat.isNaN() && !lng.isNaN()) {
-                                                            editedLatitude = lat
-                                                            editedLongitude = lng
-                                                            displayedLocation = name
-                                                            editedLocationText = name
-                                                            locationSuggestions = emptyList()
-                                                        }
-                                                    }.onFailure { e ->
-                                                        Log.w("PhotoDetailScreen", "Place details failed", e)
-                                                        locationSuggestions = emptyList()
-                                                    }
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                                    )
-                                }
-                            }
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = displayedLocation!!,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
                         }
-                    }
-                } else if (displayedLocation != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.LocationOn,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = displayedLocation!!,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
                     }
                 }
 
@@ -461,165 +729,247 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Audio: only "has recording" when we have real local or persisted URL (not blank/"null")
+                // Audio: view mode = show only when has recording (play only); edit mode = always show, record/play/delete
                 val hasLocalRecording = !recordedAudioPath.isNullOrBlank()
                 val hasPersistedAudio = !photo.audioUrl.isNullOrBlank() && photo.audioUrl != "null"
                 val hasRecording = hasLocalRecording || hasPersistedAudio
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            when {
-                                isRecording -> {
-                                    scope.launch { stopChannel.send(Unit) }
-                                }
-                                hasRecording -> {
-                                    if (mediaPlayer?.isPlaying == true) {
-                                        mediaPlayerHolder.current?.release()
-                                        mediaPlayerHolder.current = null
-                                        mediaPlayer = null
-                                        isPlaying = false
-                                    } else {
-                                        val dataSource = when {
-                                            hasLocalRecording -> recordedAudioPath!!
-                                            hasPersistedAudio -> photo.audioUrl!!
-                                            else -> null
-                                        }
-                                        if (dataSource.isNullOrBlank()) return@clickable
-                                        mediaPlayerHolder.current?.release()
-                                        mediaPlayerHolder.current = null
-                                        val player = MediaPlayer().apply {
-                                            setAudioAttributes(
-                                                AudioAttributes.Builder()
-                                                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                                                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                                                    .build()
-                                            )
-                                            setDataSource(dataSource)
-                                            prepareAsync()
-                                            setOnPreparedListener { start(); isPlaying = true }
-                                            setOnCompletionListener {
-                                                release()
-                                                mediaPlayerHolder.current = null
-                                                mediaPlayer = null
-                                                isPlaying = false
-                                            }
-                                            setOnErrorListener { _, _, _ ->
-                                                release()
-                                                mediaPlayerHolder.current = null
-                                                mediaPlayer = null
-                                                isPlaying = false
-                                                true
-                                            }
-                                        }
-                                        mediaPlayerHolder.current = player
-                                        mediaPlayer = player
-                                    }
-                                }
-                                else -> {
-                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                        startRecording()
-                                    } else {
-                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
-                                }
-                            }
-                        },
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                    )
-                ) {
-                    Row(
+                if (isEditMode || hasRecording) {
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = when {
-                                isRecording -> Icons.Default.Stop
-                                hasRecording -> Icons.Default.PlayCircle
-                                else -> Icons.Default.Mic
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(32.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = when {
-                                    isRecording -> "Recording…"
-                                    hasRecording -> "Voice note"
-                                    else -> "No voice note"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = when {
-                                    isRecording -> "Tap to stop"
-                                    hasRecording -> if (isPlaying) "Playing…" else "Tap to play"
-                                    else -> "Tap to record"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            // In edit mode, allow deleting audio when there is one
-                            if (isEditMode && hasRecording) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Delete audio",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.clickable {
-                                        recordedAudioPath = null
-                                        onDeleteAudio()
+                            .then(
+                                if (isEditMode) {
+                                    Modifier.clickable {
+                                        when {
+                                            isRecording -> scope.launch { stopChannel.send(Unit) }
+                                            hasRecording -> {
+                                                if (mediaPlayer?.isPlaying == true) {
+                                                    mediaPlayerHolder.current?.release()
+                                                    mediaPlayerHolder.current = null
+                                                    mediaPlayer = null
+                                                    isPlaying = false
+                                                } else {
+                                                    val dataSource = when {
+                                                        hasLocalRecording -> recordedAudioPath!!
+                                                        hasPersistedAudio -> photo.audioUrl!!
+                                                        else -> null
+                                                    }
+                                                    if (dataSource.isNullOrBlank()) return@clickable
+                                                    mediaPlayerHolder.current?.release()
+                                                    mediaPlayerHolder.current = null
+                                                    val player = MediaPlayer().apply {
+                                                        setAudioAttributes(
+                                                            AudioAttributes.Builder()
+                                                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                                                .build()
+                                                        )
+                                                        setDataSource(dataSource)
+                                                        prepareAsync()
+                                                        setOnPreparedListener { start(); isPlaying = true }
+                                                        setOnCompletionListener {
+                                                            release()
+                                                            mediaPlayerHolder.current = null
+                                                            mediaPlayer = null
+                                                            isPlaying = false
+                                                        }
+                                                        setOnErrorListener { _, _, _ ->
+                                                            release()
+                                                            mediaPlayerHolder.current = null
+                                                            mediaPlayer = null
+                                                            isPlaying = false
+                                                            true
+                                                        }
+                                                    }
+                                                    mediaPlayerHolder.current = player
+                                                    mediaPlayer = player
+                                                }
+                                            }
+                                            else -> {
+                                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                                    startRecording()
+                                                } else {
+                                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                }
+                                            }
+                                        }
                                     }
+                                } else {
+                                    Modifier.clickable {
+                                        if (mediaPlayer?.isPlaying == true) {
+                                            mediaPlayerHolder.current?.release()
+                                            mediaPlayerHolder.current = null
+                                            mediaPlayer = null
+                                            isPlaying = false
+                                        } else {
+                                            val dataSource = when {
+                                                hasLocalRecording -> recordedAudioPath!!
+                                                hasPersistedAudio -> photo.audioUrl!!
+                                                else -> null
+                                            }
+                                            if (dataSource.isNullOrBlank()) return@clickable
+                                            mediaPlayerHolder.current?.release()
+                                            mediaPlayerHolder.current = null
+                                            val player = MediaPlayer().apply {
+                                                setAudioAttributes(
+                                                    AudioAttributes.Builder()
+                                                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                                                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                                        .build()
+                                                )
+                                                setDataSource(dataSource)
+                                                prepareAsync()
+                                                setOnPreparedListener { start(); isPlaying = true }
+                                                setOnCompletionListener {
+                                                    release()
+                                                    mediaPlayerHolder.current = null
+                                                    mediaPlayer = null
+                                                    isPlaying = false
+                                                }
+                                                setOnErrorListener { _, _, _ ->
+                                                    release()
+                                                    mediaPlayerHolder.current = null
+                                                    mediaPlayer = null
+                                                    isPlaying = false
+                                                    true
+                                                }
+                                            }
+                                            mediaPlayerHolder.current = player
+                                            mediaPlayer = player
+                                        }
+                                    }
+                                }
+                            ),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = when {
+                                    isRecording -> Icons.Default.Stop
+                                    hasRecording -> Icons.Default.PlayCircle
+                                    else -> Icons.Default.Mic
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = when {
+                                        isRecording -> "Recording…"
+                                        hasRecording -> if (isPlaying) "Playing…" else "Tap to play"
+                                        else -> "Tap to record"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
+                                Text(
+                                    text = when {
+                                        isRecording -> "Tap to stop"
+                                        hasRecording -> ""
+                                        else -> "Record an audio for this Memento"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (isEditMode && hasRecording) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Delete voice note",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.clickable {
+                                            recordedAudioPath = null
+                                            onDeleteAudio()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
-                // Notes (underneath audio — larger textbox for associated notes)
-                Text(
-                    text = "Notes",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = notesText,
-                    onValueChange = { notesText = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 120.dp),
-                    minLines = 4,
-                    maxLines = 8,
-                    textStyle = MaterialTheme.typography.bodyMedium,
-                    placeholder = { Text("Add notes for this photo...") }
-                )
-                Button(
-                    onClick = {
-                        focusManager.clearFocus()
-                        scope.launch {
-                            delay(150)
-                            val takenAt = editedTakenAt.takeIf { it.isNotBlank() }
-                            val lat = editedLatitude ?: photo.latitude
-                            val lng = editedLongitude ?: photo.longitude
-                            withContext(Dispatchers.Main) {
-                                onSave(notesText, takenAt, lat, lng, recordedAudioPath)
-                                if (isEditMode) {
+                // Caption: view = read-only text; edit = same as Add to Memento (label + placeholder)
+                if (isEditMode) {
+                    OutlinedTextField(
+                        value = notesText,
+                        onValueChange = { notesText = it },
+                        label = { Text("Add a caption") },
+                        placeholder = { Text("E.g. Bubble tea run with Lily!") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        textStyle = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            scope.launch {
+                                delay(150)
+                                val dateMillis = pendingDateMillis ?: System.currentTimeMillis()
+                                val hour = pendingHour ?: Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+                                val minute = pendingMinute ?: Calendar.getInstance().get(Calendar.MINUTE)
+                                val takenAt = buildIsoFromDateAndTime(dateMillis, hour, minute)
+                                val lat = editedLatitude ?: photo.latitude
+                                val lng = editedLongitude ?: photo.longitude
+                                withContext(Dispatchers.Main) {
+                                    onSave(notesText, takenAt, lat, lng, recordedAudioPath)
                                     isEditMode = false
-                                    if (takenAt != null) displayedDateTime = formatBackendDateTime(takenAt) ?: takenAt
-                                    if (lat != null && lng != null) displayedLocation = displayedLocation ?: formatPhotoMetadataLocation(lat, lng)
+                                    displayedDateTime = formatBackendDateTime(takenAt) ?: formatDateMillis(dateMillis) + " " + formatTime(hour, minute)
+                                    if (lat != null && lng != null) {
+                                        displayedLocation = editedLocationText.takeIf { it.isNotBlank() }
+                                            ?: formatPhotoMetadataLocation(lat, lng)
+                                    }
                                 }
                             }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save changes")
+                    }
+                } else {
+                    // View mode: only show caption area when there is content (skip blank or "null")
+                    if (notesText.isNotBlank() && notesText != "null") {
+                        Text(
+                            text = "Notes",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = notesText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+
+            // Down arrow: below photo/details (when multiple photos)
+            if (allPhotos != null && allPhotos.size > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(if (isEditMode) "Save changes" else "Save")
+                    IconButton(
+                        onClick = {
+                            val next = (currentPhotoIndex + 1).coerceAtMost(allPhotos.size - 1)
+                            if (next != currentPhotoIndex) onPhotoIndexChange(next)
+                        },
+                        enabled = currentPhotoIndex < allPhotos.size - 1
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Next photo",
+                            modifier = Modifier.size(40.dp)
+                        )
+                    }
                 }
             }
         }

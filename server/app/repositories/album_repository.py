@@ -33,6 +33,27 @@ def create_album(db: Session, name: str, owner_id: int) -> Optional[dict]:
         raise e
 
 
+def get_album_by_owner_and_name(db: Session, owner_id: int, name: str) -> Optional[dict]:
+    """Get an album by owner and exact name."""
+    query = text("""
+        SELECT id, name, owner_id, created_at, updated_at
+        FROM albums
+        WHERE owner_id = :owner_id AND name = :name
+        LIMIT 1
+    """)
+    result = db.execute(query, {"owner_id": owner_id, "name": name})
+    row = result.fetchone()
+    if row:
+        return {
+            "id": row[0],
+            "name": row[1],
+            "owner_id": row[2],
+            "created_at": str(row[3]),
+            "updated_at": str(row[4]),
+        }
+    return None
+
+
 def get_album_by_id(db: Session, album_id: int) -> Optional[dict]:
     """Get an album by ID."""
     query = text("""

@@ -1,9 +1,11 @@
 package com.example.mementoandroid.ui.album
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +31,9 @@ fun AlbumScreen(
     isSharedAlbum: Boolean,
     showMap: Boolean,
     onShowMapChange: (Boolean) -> Unit,
+    sort: AlbumSort,
+    onSortChange: (AlbumSort) -> Unit,
+    currentUserId: Int?,
     onBack: () -> Unit,
     onEditAlbumName: () -> Unit,
     onSaveAlbumName: (newName: String) -> Unit = {},
@@ -112,6 +117,13 @@ fun AlbumScreen(
             FriendsRow(
                 friends = friends,
                 onAddFriend = onAddFriend
+            )
+            SortByRow(
+                sort = sort,
+                onSortChange = onSortChange,
+                friends = friends,
+                currentUserId = currentUserId,
+                modifier = Modifier.horizontalScroll(rememberScrollState())
             )
             if (showMap){
                 MapScreen(

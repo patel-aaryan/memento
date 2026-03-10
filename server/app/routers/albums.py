@@ -93,3 +93,14 @@ async def remove_album_member(
     album_service.remove_album_member(db, album_id, user_id, current_user["id"])
     return None
 
+
+@router.delete("/{album_id}/leave", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Security(security)])
+async def leave_album(
+    album_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Leave an album (remove yourself). Only members can leave; owner must delete the album."""
+    album_service.leave_album(db, album_id, current_user["id"])
+    return None
+

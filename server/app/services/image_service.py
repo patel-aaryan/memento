@@ -3,32 +3,34 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.repositories import image_repository, album_repository, album_member_repository
 from app.schemas.image import ImageCreate, ImageUpdate, ImageResponse
+from app.services import album_service
 
 
 def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageResponse:
-    """Create a new image. User must be owner or member of the album."""
-    # Verify album exists and user has access
-    album = album_repository.get_album_by_id(db, image_data.album_id)
-    if not album:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Album not found"
-        )
-    
-    # Check if user is owner or member
-    is_owner = album["owner_id"] == user_id
-    is_member = album_member_repository.is_album_member(db, image_data.album_id, user_id)
-    
-    if not (is_owner or is_member):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this album"
-        )
+    """Create a new image. User must be owner or member of the album. If album_id is omitted, uses user's personal 'My Photos' album."""
+    if image_data.album_id is None:
+        personal = album_service.get_or_create_personal_album(db, user_id)
+        album_id = personal["id"]
+    else:
+        album_id = image_data.album_id
+        album = album_repository.get_album_by_id(db, album_id)
+        if not album:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Album not found"
+            )
+        is_owner = album["owner_id"] == user_id
+        is_member = album_member_repository.is_album_member(db, album_id, user_id)
+        if not (is_owner or is_member):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have access to this album"
+            )
     
     # Create the image (taken_at = when photo was taken from EXIF, if provided)
     image = image_repository.create_image(
         db=db,
-        album_id=image_data.album_id,
+        album_id=album_id,
         image_url=image_data.image_url,
         user_id=user_id,
         caption=image_data.caption,
@@ -117,21 +119,26 @@ def update_image(db: Session, image_id: int, image_data: ImageUpdate, user_id: i
 
 
 def delete_image(db: Session, image_id: int, user_id: int) -> None:
-    """Delete an image. Only the creator can delete."""
+    """Delete an image. Album owner or image creator (uploader) can delete."""
     image = image_repository.get_image_by_id(db, image_id)
     if not image:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Image not found"
         )
-    
-    # Check if user is the creator
-    if image["user_id"] != user_id:
+    album = album_repository.get_album_by_id(db, image["album_id"])
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Album not found"
+        )
+    is_owner = album["owner_id"] == user_id
+    is_creator = image["user_id"] == user_id
+    if not (is_owner or is_creator):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the image creator can delete the image"
+            detail="Only the album owner or the person who uploaded the photo can delete it"
         )
-    
     success = image_repository.delete_image(db, image_id)
     if not success:
         raise HTTPException(

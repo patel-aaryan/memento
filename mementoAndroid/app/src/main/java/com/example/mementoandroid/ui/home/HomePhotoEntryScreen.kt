@@ -1,34 +1,95 @@
 package com.example.mementoandroid.ui.home
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.content.ContextCompat
+import com.example.mementoandroid.api.BackendClient
+import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.CloudinaryHelper
+import com.example.mementoandroid.util.buildIsoFromDateAndTime
+import com.example.mementoandroid.util.formatBackendDateTime
+import com.example.mementoandroid.util.formatDateMillis
+import com.example.mementoandroid.util.formatPhotoMetadataLocation
+import com.example.mementoandroid.util.formatTime
+import com.example.mementoandroid.util.parseIsoToHourMinute
+import com.example.mementoandroid.util.parseIsoToMillis
+import com.example.mementoandroid.util.recordAudioToCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import com.example.mementoandroid.util.AuthTokenStore
-import com.example.mementoandroid.util.CloudinaryHelper
-import com.example.mementoandroid.api.BackendClient
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Locale
+import java.util.TimeZone
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 
 data class HomePhotoMetadata(
     val latitude: Double? = null,
@@ -38,21 +99,159 @@ data class HomePhotoMetadata(
     val imageFile: File
 )
 
+private const val NEW_PHOTO_AUDIO_ID = "new_photo"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomePhotoEntryScreen(
     metadata: HomePhotoMetadata,
     onBack: () -> Unit,
-    onPhotoSaved: () -> Unit,
+    onPhotoSaved: (addedToAlbumId: Int?) -> Unit,
+    targetAlbumId: Int? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var caption by remember { mutableStateOf("") }
-    var audioFile by remember { mutableStateOf<File?>(null) }
     var isSaving by remember { mutableStateOf(false) }
 
+    // Date & location from metadata, with optional manual override
+    var displayedLocation by remember { mutableStateOf<String?>(null) }
+    var displayedDateTime by remember { mutableStateOf<String?>(null) }
+    var isEditingLocation by remember { mutableStateOf(false) }
+    var isEditingTimestamp by remember { mutableStateOf(false) }
+    var editedLocationText by remember { mutableStateOf("") }
+    var locationSuggestions by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var editedLatitude by remember { mutableStateOf<Double?>(null) }
+    var editedLongitude by remember { mutableStateOf<Double?>(null) }
+    var editedTakenAt by remember { mutableStateOf("") }
+    var showDatePickerDialog by remember { mutableStateOf(false) }
+    var showTimePickerDialog by remember { mutableStateOf(false) }
+    var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
+    var pendingHour by remember { mutableStateOf<Int?>(null) }
+    var pendingMinute by remember { mutableStateOf<Int?>(null) }
+
+    // Voice note (reuse PhotoDetailScreen pattern: record to cache, play, delete, re-record)
+    var recordedAudioPath by remember { mutableStateOf<String?>(null) }
+    var isRecording by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    val mediaPlayerHolder = remember { object { var current: MediaPlayer? = null } }
+    val stopChannel = remember { Channel<Unit>(Channel.CONFLATED) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            isRecording = true
+            scope.launch {
+                val path = recordAudioToCache(context, NEW_PHOTO_AUDIO_ID, stopChannel)
+                withContext(Dispatchers.Main) {
+                    isRecording = false
+                    recordedAudioPath = path
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaPlayerHolder.current?.release()
+            mediaPlayerHolder.current = null
+        }
+    }
+
+    fun startRecording() {
+        isRecording = true
+        scope.launch {
+            val path = recordAudioToCache(context, NEW_PHOTO_AUDIO_ID, stopChannel)
+            withContext(Dispatchers.Main) {
+                isRecording = false
+                recordedAudioPath = path
+            }
+        }
+    }
+
+    // Initial display: from metadata, then resolve place name from backend (Google Maps API)
+    LaunchedEffect(metadata.latitude, metadata.longitude, metadata.takenAt) {
+        val lat = metadata.latitude
+        val lng = metadata.longitude
+        if (lat != null && lng != null) {
+            withContext(Dispatchers.Main) {
+                displayedLocation = formatPhotoMetadataLocation(lat, lng)
+            }
+            val result = BackendClient.get(
+                path = "/location/nearest-place?lat=$lat&lng=$lng"
+            )
+            result.onSuccess { json ->
+                val placeName = json.optString("place_name", "")
+                if (placeName.isNotBlank()) {
+                    withContext(Dispatchers.Main) {
+                        displayedLocation = placeName
+                    }
+                }
+            }.onFailure { e ->
+                Log.w("HomePhotoEntryScreen", "Failed to fetch place name", e)
+            }
+        } else {
+            withContext(Dispatchers.Main) {
+                displayedLocation = null
+            }
+        }
+        displayedDateTime = metadata.takenAt?.let {
+            formatBackendDateTime(it) ?: run {
+                try {
+                    val date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(it)
+                    date?.let { d -> SimpleDateFormat("MMM dd, yyyy · h:mm a", Locale.US).format(d) }
+                } catch (_: Exception) { null }
+                } ?: it
+            } ?: null
+    }
+
+    // When entering timestamp edit mode, init pending date/time from current value
+    LaunchedEffect(isEditingTimestamp) {
+        if (isEditingTimestamp) {
+            val source = editedTakenAt.takeIf { it.isNotBlank() } ?: metadata.takenAt
+            val millis = parseIsoToMillis(source) ?: System.currentTimeMillis()
+            pendingDateMillis = millis
+            val hm = parseIsoToHourMinute(source)
+            if (hm != null) {
+                pendingHour = hm.first
+                pendingMinute = hm.second
+            } else {
+                val cal = Calendar.getInstance()
+                pendingHour = cal.get(Calendar.HOUR_OF_DAY)
+                pendingMinute = cal.get(Calendar.MINUTE)
+            }
+        }
+    }
+
+    // Debounced location autocomplete when user types
+    LaunchedEffect(isEditingLocation, editedLocationText) {
+        if (!isEditingLocation || editedLocationText.isBlank()) {
+            withContext(Dispatchers.Main) { locationSuggestions = emptyList() }
+            return@LaunchedEffect
+        }
+        delay(300)
+        val query = editedLocationText
+        val path = "/location/autocomplete?q=${URLEncoder.encode(query, StandardCharsets.UTF_8.name())}"
+        val result = BackendClient.get(path)
+        withContext(Dispatchers.Main) {
+            result.onSuccess { json ->
+                val arr = json.optJSONArray("predictions") ?: JSONArray()
+                val list = (0 until arr.length()).mapNotNull { i ->
+                    val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val desc = o.optString("description", "")
+                    val placeId = o.optString("place_id", "")
+                    if (desc.isNotBlank() && placeId.isNotBlank()) Pair(desc, placeId) else null
+                }
+                if (editedLocationText == query) locationSuggestions = list
+            }.onFailure {
+                if (editedLocationText == query) locationSuggestions = emptyList()
+            }
+        }
+    }
 
     val bitmap = remember(metadata.imageUri) {
         try {
@@ -64,40 +263,15 @@ fun HomePhotoEntryScreen(
         }
     }
 
-    val locationString = remember(metadata.latitude, metadata.longitude) {
-        when {
-            metadata.latitude != null && metadata.longitude != null ->
-                String.format("%.4f° N, %.4f° W", metadata.latitude, metadata.longitude)
-            else -> "Location not available"
-        }
-    }
-
-    val dateString = remember(metadata.takenAt) {
-        metadata.takenAt?.let {
-            try {
-                val date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(it)
-                SimpleDateFormat("MMM dd, yyyy · h:mm a", Locale.US).format(date)
-            } catch (e: Exception) {
-                "Date not available"
-            }
-        } ?: "Date not available"
-    }
-
-    val audioRecorderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("audio/m4a")
-    ) { uri ->
-        if (uri != null) {
-            Toast.makeText(context, "Audio recording coming soon", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     suspend fun uploadAndSave() {
         val token = AuthTokenStore.get() ?: return
+        val lat = editedLatitude ?: metadata.latitude
+        val lng = editedLongitude ?: metadata.longitude
+        val takenAt = editedTakenAt.takeIf { it.isNotBlank() } ?: metadata.takenAt
 
         val imageUrl = withContext(Dispatchers.IO) {
             CloudinaryHelper.uploadImage(context, metadata.imageFile, token)
         }
-
         if (imageUrl == null) {
             withContext(Dispatchers.Main) {
                 Toast.makeText(context, "Failed to upload image", Toast.LENGTH_SHORT).show()
@@ -106,27 +280,31 @@ fun HomePhotoEntryScreen(
         }
 
         var audioUrl: String? = null
-        if (audioFile != null) {
-            audioUrl = withContext(Dispatchers.IO) {
-                CloudinaryHelper.uploadAudio(context, audioFile!!, token)
+        if (!recordedAudioPath.isNullOrBlank()) {
+            val file = File(recordedAudioPath)
+            if (file.exists()) {
+                audioUrl = withContext(Dispatchers.IO) {
+                    CloudinaryHelper.uploadAudio(context, file, token)
+                }
             }
         }
 
         val body = JSONObject().apply {
             put("image_url", imageUrl)
             put("caption", caption)
-            metadata.latitude?.let { put("latitude", it) }
-            metadata.longitude?.let { put("longitude", it) }
-            metadata.takenAt?.let { put("taken_at", it) }
+            targetAlbumId?.let { put("album_id", it) }
+            lat?.let { put("latitude", it) }
+            lng?.let { put("longitude", it) }
+            takenAt?.let { put("taken_at", it) }
             audioUrl?.let { put("audio_url", it) }
         }
-        Log.d("DEBUG", "POST /images body: ${body.toString()}")
+        Log.d("HomePhotoEntryScreen", "POST /images body: ${body.toString()}")
         val result = BackendClient.post("/images", body, token = token)
 
         withContext(Dispatchers.Main) {
             if (result.isSuccess) {
                 Toast.makeText(context, "Photo saved!", Toast.LENGTH_SHORT).show()
-                onPhotoSaved()
+                onPhotoSaved(targetAlbumId)
             } else {
                 Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
             }
@@ -136,7 +314,7 @@ fun HomePhotoEntryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Add to Memento") },
+                title = { Text(if (targetAlbumId != null) "Add to album" else "Add to Memento") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Back")
@@ -164,10 +342,57 @@ fun HomePhotoEntryScreen(
             )
         }
     ) { padding ->
+        if (showDatePickerDialog) {
+            val datePickerState = rememberDatePickerState(
+                initialSelectedDateMillis = pendingDateMillis ?: System.currentTimeMillis()
+            )
+            DatePickerDialog(
+                onDismissRequest = { showDatePickerDialog = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        datePickerState.selectedDateMillis?.let { pendingDateMillis = it }
+                        showDatePickerDialog = false
+                    }) {
+                        Text("OK")
+                    }
+                }
+            ) {
+                DatePicker(state = datePickerState)
+            }
+        }
+        if (showTimePickerDialog) {
+            val timePickerState = rememberTimePickerState(
+                initialHour = pendingHour ?: Calendar.getInstance().get(Calendar.HOUR_OF_DAY),
+                initialMinute = pendingMinute ?: Calendar.getInstance().get(Calendar.MINUTE),
+                is24Hour = false
+            )
+            AlertDialog(
+                onDismissRequest = { showTimePickerDialog = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingHour = timePickerState.hour
+                        pendingMinute = timePickerState.minute
+                        showTimePickerDialog = false
+                    }) {
+                        Text("OK")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showTimePickerDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+                text = {
+                    TimePicker(state = timePickerState)
+                }
+            )
+        }
         LazyColumn(
             modifier = modifier
                 .fillMaxSize()
-                .padding(padding),
+                .padding(padding)
+                .padding(horizontal = 20.dp)
+                .padding(top = 16.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
@@ -183,7 +408,7 @@ fun HomePhotoEntryScreen(
                 }
             }
 
-
+            // Location: show value or "Location not available" / "Location not quite right?" with manual add
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -191,42 +416,295 @@ fun HomePhotoEntryScreen(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Text(
-                            text = locationString,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = dateString,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (isEditingLocation) {
+                            Text(
+                                text = "Location",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = editedLocationText,
+                                onValueChange = { editedLocationText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                placeholder = { Text("Search for a location (e.g. city or address)") }
+                            )
+                            if (locationSuggestions.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                locationSuggestions.forEach { (description, placeId) ->
+                                    Text(
+                                        text = description,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                scope.launch {
+                                                    val path = "/location/place-details?place_id=${URLEncoder.encode(placeId, StandardCharsets.UTF_8.name())}"
+                                                    BackendClient.get(path).onSuccess { details ->
+                                                        val lat = details.optDouble("latitude", Double.NaN)
+                                                        val lng = details.optDouble("longitude", Double.NaN)
+                                                        val name = details.optString("display_name", "").takeIf { it.isNotBlank() } ?: description
+                                                        if (!lat.isNaN() && !lng.isNaN()) {
+                                                            editedLatitude = lat
+                                                            editedLongitude = lng
+                                                            displayedLocation = name
+                                                            editedLocationText = name
+                                                            locationSuggestions = emptyList()
+                                                            isEditingLocation = false
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .padding(vertical = 8.dp)
+                                    )
+                                }
+                            }
+                            TextButton(onClick = { isEditingLocation = false }) {
+                                Text("Done")
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = displayedLocation ?: "Location not available",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (displayedLocation != null)
+                                            "Location not quite right? Click to edit"
+                                        else
+                                            "Manually add location",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable {
+                                            isEditingLocation = true
+                                            editedLocationText = displayedLocation ?: ""
+                                            editedLatitude = metadata.latitude
+                                            editedLongitude = metadata.longitude
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
+            // Date & time: show value or "Timestamp not available" with manual add
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        if (isEditingTimestamp) {
+                            Text(
+                                text = "Date & time",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = pendingDateMillis?.let { formatDateMillis(it) } ?: "No date set",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                TextButton(onClick = { showDatePickerDialog = true }) {
+                                    Text("Change date")
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                val h = pendingHour ?: 0
+                                val m = pendingMinute ?: 0
+                                Text(
+                                    text = formatTime(h, m),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                TextButton(onClick = { showTimePickerDialog = true }) {
+                                    Text("Change time")
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(onClick = {
+                                val dateMillis = pendingDateMillis ?: System.currentTimeMillis()
+                                val hour = pendingHour ?: 0
+                                val minute = pendingMinute ?: 0
+                                editedTakenAt = buildIsoFromDateAndTime(dateMillis, hour, minute)
+                                displayedDateTime = formatBackendDateTime(editedTakenAt) ?: editedTakenAt
+                                isEditingTimestamp = false
+                            }) {
+                                Text("Done")
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = displayedDateTime ?: "Timestamp not available",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (displayedDateTime != null)
+                                            "Timestamp not quite right? Click to edit"
+                                        else
+                                            "Manually add timestamp",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.clickable {
+                                            isEditingTimestamp = true
+                                            editedTakenAt = metadata.takenAt ?: ""
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Voice note: record / play / delete / re-record (no "No voice note" label)
+            item {
+                val hasRecording = !recordedAudioPath.isNullOrBlank()
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            when {
+                                isRecording -> scope.launch { stopChannel.send(Unit) }
+                                hasRecording -> {
+                                    if (mediaPlayer?.isPlaying == true) {
+                                        mediaPlayerHolder.current?.release()
+                                        mediaPlayerHolder.current = null
+                                        mediaPlayer = null
+                                        isPlaying = false
+                                    } else {
+                                        val path = recordedAudioPath!!
+                                        mediaPlayerHolder.current?.release()
+                                        mediaPlayerHolder.current = null
+                                        val player = MediaPlayer().apply {
+                                            setAudioAttributes(
+                                                AudioAttributes.Builder()
+                                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                                    .build()
+                                            )
+                                            setDataSource(path)
+                                            prepareAsync()
+                                            setOnPreparedListener { start(); isPlaying = true }
+                                            setOnCompletionListener {
+                                                release()
+                                                mediaPlayerHolder.current = null
+                                                mediaPlayer = null
+                                                isPlaying = false
+                                            }
+                                            setOnErrorListener { _, _, _ ->
+                                                release()
+                                                mediaPlayerHolder.current = null
+                                                mediaPlayer = null
+                                                isPlaying = false
+                                                true
+                                            }
+                                        }
+                                        mediaPlayerHolder.current = player
+                                        mediaPlayer = player
+                                    }
+                                }
+                                else -> {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        startRecording()
+                                    } else {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                }
+                            }
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            text = if (audioFile != null) "Voice note recorded" else "No voice note",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                audioRecorderLauncher.launch("voice_note_${System.currentTimeMillis()}.m4a")
+                        Icon(
+                            imageVector = when {
+                                isRecording -> Icons.Default.Stop
+                                hasRecording -> Icons.Default.PlayCircle
+                                else -> Icons.Default.Mic
                             },
-                            enabled = !isSaving
-                        ) {
-                            Icon(Icons.Default.Mic, null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (audioFile != null) "Re-record" else "Record voice note")
+                            contentDescription = null,
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = when {
+                                    isRecording -> "Recording…"
+                                    hasRecording -> if (isPlaying) "Playing…" else "Tap to play"
+                                    else -> "Tap to record"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Record an audio for this Memento",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            if (hasRecording) {
+                                Text(
+                                    text = "Delete voice note",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.clickable {
+                                        mediaPlayerHolder.current?.release()
+                                        mediaPlayerHolder.current = null
+                                        mediaPlayer = null
+                                        isPlaying = false
+                                        recordedAudioPath = null
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -236,8 +714,8 @@ fun HomePhotoEntryScreen(
                 OutlinedTextField(
                     value = caption,
                     onValueChange = { caption = it },
-                    label = { Text("Caption") },
-                    placeholder = { Text("Add a caption...") },
+                    label = { Text("Add a caption") },
+                    placeholder = { Text("E.g. Bubble tea run with Lily!") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isSaving,
                     minLines = 3

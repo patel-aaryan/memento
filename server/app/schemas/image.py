@@ -4,7 +4,7 @@ from decimal import Decimal
 
 
 class ImageCreate(BaseModel):
-    album_id: int
+    album_id: Optional[int] = None  # If omitted, image is added to user's personal "My Photos" album
     caption: Optional[str] = None
     image_url: str
     audio_url: Optional[str] = None  # Cloudinary URL after audio upload

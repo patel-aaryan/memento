@@ -1,8 +1,11 @@
 package com.example.mementoandroid.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -47,20 +50,40 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.mementoandroid.ui.album.AlbumUi
+import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.home.components.AlbumLogo
+import com.example.mementoandroid.util.formatPhotoMetadataLocation
 
-// Define the HomeAddAction sealed class here if it's not in a separate file
+/** Home list item: either a standalone photo (click opens photo detail) or an album (click opens album). */
+sealed class HomeItem {
+    data class StandalonePhoto(val photo: AlbumPhotoUi, val albumId: Int) : HomeItem()
+    data class Album(val album: AlbumUi) : HomeItem()
+}
+
+private fun HomeItem.displayTitle(): String = when (this) {
+    is HomeItem.StandalonePhoto -> {
+        val p = photo
+        if (p.latitude != null && p.longitude != null) formatPhotoMetadataLocation(p.latitude, p.longitude)
+        else "Unknown location"
+    }
+    is HomeItem.Album -> album.name
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     albums: List<AlbumUi>,
+    standalonePhotos: List<AlbumPhotoUi> = emptyList(),
+    myPhotosAlbumId: Int? = null,
     modifier: Modifier = Modifier,
     profilePictureUrl: String? = null,
     onProfileClick: () -> Unit,
     onAlbumClick: (Int) -> Unit = {},
+    onStandalonePhotoClick: (AlbumPhotoUi) -> Unit = {},
     onAction: (HomeAddAction) -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -70,9 +93,16 @@ fun HomeScreen(
         skipPartiallyExpanded = true
     )
 
-    val filteredItems = remember(searchQuery, albums) {
-        if (searchQuery.isBlank()) albums
-        else albums.filter { it.name.contains(searchQuery, ignoreCase = true) }
+    val albumsWithoutMyPhotos = remember(albums, myPhotosAlbumId) {
+        if (myPhotosAlbumId == null) albums else albums.filter { it.id != myPhotosAlbumId }
+    }
+    val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos) {
+        val aid = myPhotosAlbumId ?: 0
+        standalonePhotos.map { HomeItem.StandalonePhoto(it, aid) } + albumsWithoutMyPhotos.map { HomeItem.Album(it) }
+    }
+    val filteredItems = remember(searchQuery, homeItems) {
+        if (searchQuery.isBlank()) homeItems
+        else homeItems.filter { it.displayTitle().contains(searchQuery, ignoreCase = true) }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -151,7 +181,7 @@ fun HomeScreen(
                 )
             }
 
-            // Albums list or grid
+            // Standalone photos + albums list or grid
             if (showTileView) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
@@ -162,12 +192,19 @@ fun HomeScreen(
                 ) {
                     items(
                         items = filteredItems,
-                        key = { it.id },
+                        key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
                     ) { item ->
-                        AlbumTile(
-                            album = item,
-                            onClick = { onAlbumClick(item.id) },
-                        )
+                        when (item) {
+                            is HomeItem.StandalonePhoto -> StandalonePhotoTile(
+                                photo = item.photo,
+                                title = item.displayTitle(),
+                                onClick = { onStandalonePhotoClick(item.photo) },
+                            )
+                            is HomeItem.Album -> AlbumTile(
+                                album = item.album,
+                                onClick = { onAlbumClick(item.album.id) },
+                            )
+                        }
                     }
                 }
             } else {
@@ -177,27 +214,35 @@ fun HomeScreen(
                 ) {
                     items(
                         items = filteredItems,
-                        key = { it.id },
+                        key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
                     ) { item ->
-                        ListItem(
-                            modifier = Modifier.clickable { onAlbumClick(item.id) },
-                            leadingContent = {
-                                AlbumLogo(
-                                    album = item,
-                                    size = 32.dp,
-                                )
-                            },
-                            headlineContent = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(24.dp),
-                                    contentAlignment = Alignment.CenterStart,
-                                ) {
-                                    Text(item.name)
-                                }
-                            },
-                        )
+                        when (item) {
+                            is HomeItem.StandalonePhoto -> ListItem(
+                                modifier = Modifier.clickable { onStandalonePhotoClick(item.photo) },
+                                leadingContent = {
+                                    StandalonePhotoThumbnail(photo = item.photo, size = 32.dp)
+                                },
+                                headlineContent = {
+                                    Text(
+                                        item.displayTitle(),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                            )
+                            is HomeItem.Album -> ListItem(
+                                modifier = Modifier.clickable { onAlbumClick(item.album.id) },
+                                leadingContent = {
+                                    AlbumLogo(
+                                        album = item.album,
+                                        size = 32.dp,
+                                    )
+                                },
+                                headlineContent = {
+                                    Text(item.album.name)
+                                },
+                            )
+                        }
                         HorizontalDivider()
                     }
                 }
@@ -267,6 +312,68 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StandalonePhotoTile(
+    photo: AlbumPhotoUi,
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            photo.imageUrl?.let { url ->
+                AsyncImage(
+                    model = url,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun StandalonePhotoThumbnail(
+    photo: AlbumPhotoUi,
+    size: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        photo.imageUrl?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
