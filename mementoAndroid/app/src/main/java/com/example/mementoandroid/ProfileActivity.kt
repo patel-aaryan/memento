@@ -323,12 +323,12 @@ fun ProfileScreen(
     onAddFriendByEmail: ((String) -> Unit)? = null,
     onLogout: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val profileName = user?.name ?: "Loading..."
     val profileEmail = user?.email ?: ""
     val profilePictureUrl = user?.profilePictureUrl
     var showNameDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var notificationsEnabled by remember { mutableStateOf(true) }
     var darkModeEnabled by remember { mutableStateOf(false) }
     var friendEmail by remember { mutableStateOf("") }
 
@@ -413,19 +413,21 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
+                Button(
+                    onClick = {
+                        val intent = Intent().apply {
+                            action = android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        }
+                        context.startActivity(intent)
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(vertical = 8.dp)
                 ) {
-                    Text(text = "Enable Notifications", fontSize = 16.sp)
-                    Switch(
-                        checked = notificationsEnabled,
-                        onCheckedChange = { notificationsEnabled = it }
-                    )
+                    Text("Manage Notifications")
                 }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

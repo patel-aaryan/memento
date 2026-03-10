@@ -108,7 +108,7 @@ async def location_place_details(
 async def anniversary_check(
     lat: float = Query(..., description="Current latitude"),
     lng: float = Query(..., description="Current longitude"),
-    radius_m: float = Query(500.0, gt=0.0, le=500.0, description="Match radius in meters"),
+    radius_m: float = Query(5000.0, gt=0.0, le=5000.0, description="Match radius in meters"),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
