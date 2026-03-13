@@ -26,6 +26,7 @@ fun AlbumTopBar(
     onSave: () -> Unit = {},
     onCancel: () -> Unit = {},
     selectedCount: Int = 0,
+    canDeleteSelected: Boolean = true,
     onShareSelected: () -> Unit = {},
     onDeleteSelected: () -> Unit = {},
 ) {
@@ -61,8 +62,15 @@ fun AlbumTopBar(
                     IconButton(onClick = onShareSelected) {
                         Icon(Icons.Default.Share, contentDescription = "Share selected")
                     }
-                    IconButton(onClick = onDeleteSelected) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete selected")
+                    IconButton(
+                        onClick = onDeleteSelected,
+                        enabled = canDeleteSelected
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Delete selected",
+                            tint = if (canDeleteSelected) LocalContentColor.current else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        )
                     }
                 }
                 IconButton(onClick = onSave) {

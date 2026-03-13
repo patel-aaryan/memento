@@ -24,11 +24,7 @@ fun PhotoGrid(
     selectedIds: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
 ) {
-    fun isSelectable(photo: AlbumPhotoUi): Boolean {
-        if (!isEditMode) return false
-        return if (isOwner) true
-        else currentUserId != null && photo.userId == currentUserId
-    }
+    val isSelectable = isEditMode
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
@@ -45,14 +41,15 @@ fun PhotoGrid(
         }
 
         items(photos, key = { it.id }) { photo ->
-            val selectable = isSelectable(photo)
             val selected = photo.id in selectedIds
+            val isOwnedByCurrentUser = !isOwner && currentUserId != null && photo.userId == currentUserId
             PhotoTile(
                 photo = photo,
                 onClick = { onPhotoClick(photo.id) },
                 isEditMode = isEditMode,
-                isSelectable = selectable,
+                isSelectable = isSelectable,
                 isSelected = selected,
+                isOwnedByCurrentUser = isOwnedByCurrentUser,
                 onToggleSelect = {
                     onSelectionChange(
                         if (selected) selectedIds - photo.id

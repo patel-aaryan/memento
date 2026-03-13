@@ -17,7 +17,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -32,13 +31,14 @@ fun PhotoTile(
     isEditMode: Boolean = false,
     isSelectable: Boolean = true,
     isSelected: Boolean = false,
+    isOwnedByCurrentUser: Boolean = false,
     onToggleSelect: () -> Unit = {},
 ) {
     Card(
         modifier = modifier
             .aspectRatio(1f)
             .then(
-                if (isEditMode && !isSelectable) Modifier.alpha(0.5f)
+                if (isEditMode && isOwnedByCurrentUser) Modifier.border(3.dp, androidx.compose.material3.MaterialTheme.colorScheme.tertiary, RoundedCornerShape(16.dp))
                 else Modifier
             )
             .then(
@@ -75,7 +75,7 @@ fun PhotoTile(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            if (isEditMode && isSelectable && isSelected) {
+            if (isEditMode && isSelected) {
                 Icon(
                     imageVector = Icons.Default.Check,
                     contentDescription = "Selected",

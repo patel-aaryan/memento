@@ -66,6 +66,11 @@ fun AlbumScreen(
     val selectedPhotos = remember(displayPhotos, selectedIds) {
         displayPhotos.filter { it.id in selectedIds }
     }
+    val canDeleteSelected = remember(isAlbumOwner, selectedIds, selectedPhotos, currentUserId) {
+        if (selectedIds.isEmpty()) false
+        else if (isAlbumOwner) true
+        else selectedPhotos.all { it.userId == currentUserId }
+    }
 
     fun exitEditMode() {
         isEditMode = false
@@ -97,6 +102,7 @@ fun AlbumScreen(
                 },
                 onCancel = { exitEditMode() },
                 selectedCount = selectedIds.size,
+                canDeleteSelected = canDeleteSelected,
                 onShareSelected = { onSharePhotos(selectedPhotos) },
                 onDeleteSelected = {
                     idsToDelete = idsToDelete + selectedIds
