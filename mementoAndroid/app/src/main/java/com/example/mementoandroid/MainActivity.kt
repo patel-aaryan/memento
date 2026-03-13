@@ -14,8 +14,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,8 +36,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.mementoandroid.api.BackendClient
@@ -148,6 +159,9 @@ class MainActivity : ComponentActivity() {
 
                 var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
                 var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+                val cameraBuffer = remember { mutableStateListOf<SelectedImage>() }
+                var showCameraBufferOverlay by remember { mutableStateOf(false) }
+                var cameraTargetAlbumId by remember { mutableStateOf<Int?>(null) }
                 var pendingHomePhotoEntry by rememberSaveable { mutableStateOf<HomePhotoMetadata?>(null) }
                 var pendingAlbumPhotoEntry by remember { mutableStateOf<Pair<HomePhotoMetadata, Int>?>(null) }
                 var pendingMultiplePhotos by remember { mutableStateOf<List<SelectedImage>?>(null) }
@@ -464,35 +478,28 @@ class MainActivity : ComponentActivity() {
                 val takePictureLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.TakePicture()
                 ) { success ->
-                    if (success) {
-                        val file = pendingCameraFile
-                        val uri = pendingCameraUri
-                        val albumId = selectedAlbumId
-                        pendingCameraFile = null
-                        pendingCameraUri = null
-                        if (file != null && file.exists()) {
-                            scope.launch(Dispatchers.IO) {
-                                val md = extractPhotoMetadata(context, uri ?: Uri.fromFile(file))
-                                val takenAt = md?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
-                                    ?: md?.dateTaken?.let { exifDateTimeToIso(it) }
-
-                                withContext(Dispatchers.Main) {
-                                    val meta = HomePhotoMetadata(
-                                        latitude = md?.latitude,
-                                        longitude = md?.longitude,
-                                        takenAt = takenAt,
-                                        imageUri = uri ?: Uri.fromFile(file),
-                                        imageFile = file
-                                    )
-                                    if (albumId != null) {
-                                        pendingAlbumPhotoEntry = Pair(meta, albumId)
-                                    } else {
-                                        pendingHomePhotoEntry = meta
-                                    }
-                                }
-                            }
-                        }
+                    val file = pendingCameraFile
+                    val uri = pendingCameraUri
+                    pendingCameraFile = null
+                    pendingCameraUri = null
+                    if (success && file != null && file.exists() && uri != null) {
+                        cameraBuffer.add(SelectedImage(uri, file))
                     }
+                    if (cameraBuffer.isNotEmpty()) {
+                        showCameraBufferOverlay = true
+                    }
+                }
+
+                fun launchCamera(targetAlbumId: Int?) {
+                    cameraTargetAlbumId = targetAlbumId
+                    val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+                    pendingCameraFile = file
+                    pendingCameraUri = FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        file
+                    )
+                    pendingCameraUri?.let { takePictureLauncher.launch(it) }
                 }
 
                 val pickPhotoLauncher = rememberLauncherForActivityResult(
@@ -563,22 +570,11 @@ class MainActivity : ComponentActivity() {
 
                 fun onAddPhoto(source: AddPhotoSource) {
                     when (source) {
-                        AddPhotoSource.Camera -> {
-                            val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
-                            pendingCameraFile = file
-                            pendingCameraUri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                file
-                            )
-                            pendingCameraUri?.let { takePictureLauncher.launch(it) }
-                        }
+                        AddPhotoSource.Camera -> launchCamera(selectedAlbumId)
                         AddPhotoSource.Photos -> {
                             if (selectedAlbumId != null) {
-                                // If we're in an album, use multi-photo picker for album addition
                                 pickMultiplePhotosLauncher.launch("image/*")
                             } else {
-                                // If we're not in an album, use single photo picker (though this case might not happen)
                                 pickPhotoLauncher.launch(arrayOf("image/*"))
                             }
                         }
@@ -587,26 +583,16 @@ class MainActivity : ComponentActivity() {
 
                 fun onHomeAction(action: HomeAddAction) {
                     when (action) {
-                        HomeAddAction.Camera -> {
-                            val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
-                            pendingCameraFile = file
-                            pendingCameraUri = FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.fileprovider",
-                                file
-                            )
-                            pendingCameraUri?.let { takePictureLauncher.launch(it) }
-                        }
-                        HomeAddAction.Photos -> {
-                            // Launch multi-photo picker for home screen
-                            pickMultiplePhotosLauncher.launch("image/*")
-                        }
+                        HomeAddAction.Camera -> launchCamera(null)
+                        HomeAddAction.Photos -> pickMultiplePhotosLauncher.launch("image/*")
                         HomeAddAction.MakeAlbum -> showCreateAlbum = true
                     }
                 }
 
                 val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.name }
 
+                @OptIn(ExperimentalMaterial3Api::class)
+                Box(Modifier.fillMaxSize()) {
                 when {
                     showFriendPicker && pendingAlbumIdForFriend != null -> {
                         BackHandler {
@@ -1042,6 +1028,51 @@ class MainActivity : ComponentActivity() {
                             onAction = ::onHomeAction
                         )
                     }
+                }
+
+                if (showCameraBufferOverlay && cameraBuffer.isNotEmpty()) {
+                    ModalBottomSheet(
+                        onDismissRequest = {
+                            showCameraBufferOverlay = false
+                            cameraBuffer.clear()
+                        }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"} captured",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Button(
+                                onClick = {
+                                    showCameraBufferOverlay = false
+                                    launchCamera(cameraTargetAlbumId)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Take another")
+                            }
+                            Button(
+                                onClick = {
+                                    val toUpload = cameraBuffer.toList()
+                                    cameraBuffer.clear()
+                                    showCameraBufferOverlay = false
+                                    pendingMultiplePhotos = toUpload
+                                    currentMultiPhotoIndex = 0
+                                    processNextPhoto(toUpload, 0, cameraTargetAlbumId)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Upload ${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"}")
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                    }
+                }
                 }
             }
         }
