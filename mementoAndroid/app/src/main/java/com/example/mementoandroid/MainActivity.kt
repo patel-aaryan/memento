@@ -50,6 +50,8 @@ import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
 import com.example.mementoandroid.ui.home.HomePhotoMetadata
 import com.example.mementoandroid.ui.home.HomeScreen
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
+import com.example.mementoandroid.util.AlbumSortStore
+import com.example.mementoandroid.util.AlbumViewStore
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
@@ -97,6 +99,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        AlbumSortStore.init(applicationContext)
+        AlbumViewStore.init(applicationContext)
 
         // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -244,12 +248,20 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(selectedAlbumId) {
-                    if (selectedAlbumId == null) {
-                        withContext(Dispatchers.Main) { albumMembers = emptyList() }
+                    val aid = selectedAlbumId
+                    if (aid != null) {
+                        AlbumSortStore.get(aid)?.let { saved ->
+                            withContext(Dispatchers.Main) { albumSort = saved }
+                        }
+                    }
+                    if (aid == null) {
+                        withContext(Dispatchers.Main) {
+                            albumMembers = emptyList()
+                            photos.clear()
+                        }
                         return@LaunchedEffect
                     }
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
-                    val aid = selectedAlbumId!!
 
                     BackendClient.getArray("/albums/$aid/members", t).onSuccess { membersArr ->
                         val currentUserId = AuthTokenStore.getUserId()?.toString()
@@ -803,7 +815,10 @@ class MainActivity : ComponentActivity() {
                             showMap = albumShowMap,
                             onShowMapChange = { albumShowMap = it },
                             sort = albumSort,
-                            onSortChange = { albumSort = it },
+                            onSortChange = { newSort ->
+                                albumSort = newSort
+                                AlbumSortStore.save(albumId, newSort)
+                            },
                             currentUserId = AuthTokenStore.getUserId(),
                             onBack = { selectedAlbumId = null },
                             onEditAlbumName = {},

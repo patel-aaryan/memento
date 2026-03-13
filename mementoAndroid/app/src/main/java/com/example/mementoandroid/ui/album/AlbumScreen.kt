@@ -118,13 +118,15 @@ fun AlbumScreen(
                 friends = friends,
                 onAddFriend = onAddFriend
             )
-            SortByRow(
-                sort = sort,
-                onSortChange = onSortChange,
-                friends = friends,
-                currentUserId = currentUserId,
-                modifier = Modifier.horizontalScroll(rememberScrollState())
-            )
+            if (!showMap) {
+                SortByRow(
+                    sort = sort,
+                    onSortChange = onSortChange,
+                    friends = friends,
+                    currentUserId = currentUserId,
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                )
+            }
             if (showMap){
                 MapScreen(
                     photos = photos,

@@ -8,7 +8,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,7 +24,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import com.example.mementoandroid.ui.album.FriendUi
+import com.example.mementoandroid.util.orDefaultAvatar
 import androidx.compose.foundation.background
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -239,28 +241,15 @@ fun FriendPickerItem(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer)
             ) {
-                if (friend.profilePictureUrl != null) {
-                    // You can add Coil/Glide here later for profile pics
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .align(Alignment.Center),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.Person,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .align(Alignment.Center),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
+                AsyncImage(
+                    model = friend.profilePictureUrl.orDefaultAvatar(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
             }
         },
         headlineContent = {

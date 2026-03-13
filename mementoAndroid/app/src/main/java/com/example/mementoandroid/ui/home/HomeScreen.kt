@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Button
@@ -40,11 +39,13 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.example.mementoandroid.util.AlbumViewStore
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.mementoandroid.util.orDefaultAvatar
 import com.example.mementoandroid.ui.album.AlbumUi
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.home.components.AlbumLogo
@@ -88,7 +90,12 @@ fun HomeScreen(
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
-    var showTileView by rememberSaveable { mutableStateOf(false) }
+    val initialGridView = remember { AlbumViewStore.getIsGridView() }
+    var showTileView by remember(initialGridView) { mutableStateOf(initialGridView) }
+
+    LaunchedEffect(showTileView) {
+        AlbumViewStore.saveIsGridView(showTileView)
+    }
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
     )
@@ -120,32 +127,18 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Profile avatar / FAB
-                if (!profilePictureUrl.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .clickable(onClick = onProfileClick)
-                    ) {
-                        AsyncImage(
-                            model = profilePictureUrl,
-                            contentDescription = "Profile",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                } else {
-                    FloatingActionButton(
-                        onClick = onProfileClick,
-                        modifier = Modifier.size(48.dp),
-                        content = {
-                            Icon(
-                                Icons.Default.Person,
-                                contentDescription = "Profile",
-                                modifier = Modifier.size(24.dp),
-                            )
-                        },
+                // Profile avatar
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onProfileClick)
+                ) {
+                    AsyncImage(
+                        model = profilePictureUrl.orDefaultAvatar(),
+                        contentDescription = "Profile",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
                     )
                 }
 

@@ -38,13 +38,13 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Color
 import coil.compose.AsyncImage
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.api.BackendException
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.components.AddPhotoBottomSheet
 import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.orDefaultAvatar
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import kotlinx.coroutines.Dispatchers
@@ -352,7 +352,7 @@ fun ProfileScreen(
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Profile picture (from GET /auth/me URL, or placeholder)
+            // Profile picture (from GET /auth/me URL, or default placeholder)
             Box(
                 modifier = Modifier
                     .size(120.dp)
@@ -360,23 +360,14 @@ fun ProfileScreen(
                     .clickable(onClick = onProfilePictureClick),
                 contentAlignment = Alignment.Center
             ) {
-                if (!profilePictureUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = profilePictureUrl,
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                AsyncImage(
+                    model = profilePictureUrl.orDefaultAvatar(),
+                    contentDescription = "Profile Picture",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -517,23 +508,14 @@ fun ProfileScreen(
                                         .clip(CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    if (!friend.profilePictureUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model = friend.profilePictureUrl,
-                                            contentDescription = "Friend avatar",
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Person,
-                                            contentDescription = "Friend",
-                                            modifier = Modifier.size(24.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    AsyncImage(
+                                        model = friend.profilePictureUrl.orDefaultAvatar(),
+                                        contentDescription = "Friend avatar",
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
                                 }
 
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -671,7 +653,7 @@ fun ImagePickerPopup(
                                 .clip(RoundedCornerShape(12.dp))
                                 .border(
                                     width = if (isSelected) 3.dp else 1.dp,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                     shape = RoundedCornerShape(12.dp)
                                 )
                                 .clickable {

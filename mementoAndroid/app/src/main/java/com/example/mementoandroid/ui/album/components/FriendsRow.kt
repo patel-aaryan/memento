@@ -16,6 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.mementoandroid.ui.album.FriendUi
+import com.example.mementoandroid.util.orDefaultAvatar
 
 @Composable
 fun FriendsRow(
@@ -51,22 +52,14 @@ private fun FriendChip(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.width(72.dp)
     ) {
-        if (profilePictureUrl != null) {
-            AsyncImage(
-                model = profilePictureUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(CircleShape),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Surface(
-                modifier = Modifier.size(52.dp),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {}
-        }
+        AsyncImage(
+            model = profilePictureUrl.orDefaultAvatar(),
+            contentDescription = null,
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
         Spacer(Modifier.height(6.dp))
         Text(
             text = username,
