@@ -59,6 +59,9 @@ import com.example.mementoandroid.ui.album.AlbumUi
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
 import com.example.mementoandroid.ui.home.components.AlbumLogo
 import com.example.mementoandroid.util.formatPhotoMetadataLocation
+import com.example.mementoandroid.ui.home.components.SortAndFilterRow
+import com.example.mementoandroid.ui.home.components.HomeSort
+import com.example.mementoandroid.ui.home.components.HomeSortKind
 
 /** Home list item: either a standalone photo (click opens photo detail) or an album (click opens album). */
 sealed class HomeItem {
@@ -92,6 +95,7 @@ fun HomeScreen(
     var showAddSheet by rememberSaveable { mutableStateOf(false) }
     val initialGridView = remember { AlbumViewStore.getIsGridView() }
     var showTileView by remember(initialGridView) { mutableStateOf(initialGridView) }
+    var homeSort by remember { mutableStateOf(HomeSort(HomeSortKind.NEWEST_FIRST)) }
 
     LaunchedEffect(showTileView) {
         AlbumViewStore.saveIsGridView(showTileView)
@@ -103,10 +107,17 @@ fun HomeScreen(
     val albumsWithoutMyPhotos = remember(albums, myPhotosAlbumId) {
         if (myPhotosAlbumId == null) albums else albums.filter { it.id != myPhotosAlbumId }
     }
-    val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos) {
+    val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos, homeSort) {
         val aid = myPhotosAlbumId ?: 0
-        standalonePhotos.map { HomeItem.StandalonePhoto(it, aid) } + albumsWithoutMyPhotos.map { HomeItem.Album(it) }
+        // Sort standalone photos
+        val sortedPhotos = standalonePhotos.sortedPhotosForHome(homeSort)
+
+        // Sort albums
+        val sortedAlbums = albumsWithoutMyPhotos.sortedAlbumsForHome(homeSort)
+
+        sortedPhotos.map { HomeItem.StandalonePhoto(it, aid) } + sortedAlbums.map { HomeItem.Album(it) }
     }
+
     val filteredItems = remember(searchQuery, homeItems) {
         if (searchQuery.isBlank()) homeItems
         else homeItems.filter { it.displayTitle().contains(searchQuery, ignoreCase = true) }
@@ -174,7 +185,12 @@ fun HomeScreen(
                 )
             }
 
-            // Standalone photos + albums list or grid
+            SortAndFilterRow(
+                sort = homeSort,
+                onSortChange = { homeSort = it },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
             if (showTileView) {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
@@ -395,5 +411,19 @@ private fun AlbumTile(
                 .padding(top = 8.dp)
                 .fillMaxWidth(),
         )
+    }
+}
+
+fun List<AlbumUi>.sortedAlbumsForHome(sort: HomeSort): List<AlbumUi> {
+    return when (sort.kind) {
+        HomeSortKind.NEWEST_FIRST -> sortedByDescending { it.id }
+        HomeSortKind.OLDEST_FIRST -> sortedBy { it.id }
+    }
+}
+
+fun List<AlbumPhotoUi>.sortedPhotosForHome(sort: HomeSort): List<AlbumPhotoUi> {
+    return when (sort.kind) {
+        HomeSortKind.NEWEST_FIRST -> sortedByDescending { it.dateAdded ?: "" }
+        HomeSortKind.OLDEST_FIRST -> sortedBy { it.dateAdded ?: "" }
     }
 }
