@@ -3,24 +3,18 @@ package com.example.mementoandroid.ui.album
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import com.example.mementoandroid.ui.album.components.*
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Scaffold
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import com.example.mementoandroid.ui.album.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +28,7 @@ fun AlbumScreen(
     sort: AlbumSort,
     onSortChange: (AlbumSort) -> Unit,
     currentUserId: Int?,
+    isAlbumOwner: Boolean,
     onBack: () -> Unit,
     onEditAlbumName: () -> Unit,
     onSaveAlbumName: (newName: String) -> Unit = {},
@@ -41,11 +36,19 @@ fun AlbumScreen(
     onAddFriend: () -> Unit,
     onPhotoClick: (photoId: String) -> Unit,
     onAddPhoto: (source: AddPhotoSource) -> Unit,
+    onSaveEdits: (newName: String?, imageIdsToDelete: List<String>) -> Unit = { _, _ -> },
+    onSharePhotos: (List<AlbumPhotoUi>) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var addPhotoSheetOpen by remember { mutableStateOf(false) }
-    var showEditDialog by remember { mutableStateOf(false) }
-    var editedName by remember(albumName, showEditDialog) { mutableStateOf(albumName) }
+    var isEditMode by remember { mutableStateOf(false) }
+    var editedTitle by remember(albumName, isEditMode) { mutableStateOf(albumName) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var idsToDelete by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(albumName) {
+        if (!isEditMode) editedTitle = albumName
+    }
 
     if (addPhotoSheetOpen) {
         AddPhotoBottomSheet(
@@ -57,38 +60,18 @@ fun AlbumScreen(
         )
     }
 
-    if (showEditDialog) {
-        AlertDialog(
-            onDismissRequest = { showEditDialog = false },
-            title = { Text("Edit album name") },
-            text = {
-                OutlinedTextField(
-                    value = editedName,
-                    onValueChange = { editedName = it },
-                    label = { Text("Album name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val name = editedName.trim()
-                        if (name.isNotBlank()) {
-                            onSaveAlbumName(name)
-                            showEditDialog = false
-                        }
-                    }
-                ) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+    val displayPhotos = remember(photos, idsToDelete) {
+        photos.filter { it.id !in idsToDelete }
+    }
+    val selectedPhotos = remember(displayPhotos, selectedIds) {
+        displayPhotos.filter { it.id in selectedIds }
+    }
+
+    fun exitEditMode() {
+        isEditMode = false
+        selectedIds = emptySet()
+        idsToDelete = emptySet()
+        editedTitle = albumName
     }
 
     Scaffold(
@@ -97,11 +80,30 @@ fun AlbumScreen(
             AlbumTopBar(
                 albumName = albumName,
                 onBack = onBack,
-                onEditAlbumName = { showEditDialog = true },
-                onDeleteAlbum = onDeleteAlbum
+                onEditAlbumName = {
+                    isEditMode = true
+                    editedTitle = albumName
+                },
+                onDeleteAlbum = onDeleteAlbum,
+                isEditMode = isEditMode,
+                isOwner = isAlbumOwner,
+                editedTitle = editedTitle,
+                onEditedTitleChange = { editedTitle = it },
+                onSave = {
+                    val newName = if (isAlbumOwner && editedTitle.trim() != albumName) editedTitle.trim().takeIf { it.isNotBlank() } else null
+                    val toDelete = idsToDelete.toList()
+                    onSaveEdits(newName, toDelete)
+                    exitEditMode()
+                },
+                onCancel = { exitEditMode() },
+                selectedCount = selectedIds.size,
+                onShareSelected = { onSharePhotos(selectedPhotos) },
+                onDeleteSelected = {
+                    idsToDelete = idsToDelete + selectedIds
+                    selectedIds = emptySet()
+                }
             )
         },
-        // Map button
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { onShowMapChange(!showMap) }
@@ -127,21 +129,24 @@ fun AlbumScreen(
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 )
             }
-            if (showMap){
+            if (showMap) {
                 MapScreen(
-                    photos = photos,
+                    photos = displayPhotos,
                     onPhotoClick = onPhotoClick
                 )
             } else {
                 PhotoGrid(
-                    photos = photos,
+                    photos = displayPhotos,
                     onPhotoClick = onPhotoClick,
                     onAddClick = { addPhotoSheetOpen = true },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    isEditMode = isEditMode,
+                    isOwner = isAlbumOwner,
+                    currentUserId = currentUserId,
+                    selectedIds = selectedIds,
+                    onSelectionChange = { selectedIds = it }
                 )
             }
         }
     }
 }
-
-

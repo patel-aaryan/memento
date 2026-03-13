@@ -57,6 +57,7 @@ import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
 import com.example.mementoandroid.util.exifDateTimeToIso
+import com.example.mementoandroid.util.sharePhotos
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
@@ -975,35 +976,45 @@ class MainActivity : ComponentActivity() {
                                 AlbumSortStore.save(albumId, newSort)
                             },
                             currentUserId = AuthTokenStore.getUserId(),
+                            isAlbumOwner = isAlbumOwner,
                             onBack = { selectedAlbumId = null },
                             onEditAlbumName = {},
-                            onSaveAlbumName = { newName ->
-                                scope.launch {
-                                    val t = AuthTokenStore.get() ?: return@launch
-                                    val body = JSONObject().put("name", newName)
-                                    val result = BackendClient.put("/albums/$albumId", body, token = t)
-                                    withContext(Dispatchers.Main) {
-                                        result.onFailure { handle401(context, it) }
-                                        if (result.isSuccess) {
-                                            albums = albums.map { if (it.id == albumId) it.copy(name = newName) else it }
-                                            Toast.makeText(context, "Album name updated", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(
-                                                context,
-                                                (result.exceptionOrNull() as? BackendException)?.message ?: "Failed to update",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    }
-                                }
-                            },
+                            onSaveAlbumName = { },
                             onDeleteAlbum = { showDeleteAlbumDialog = true },
                             onAddFriend = {
                                 pendingAlbumIdForFriend = albumId
                                 showFriendPicker = true
                             },
                             onPhotoClick = { selectedPhotoId = it },
-                            onAddPhoto = ::onAddPhoto
+                            onAddPhoto = ::onAddPhoto,
+                            onSaveEdits = { newName, imageIdsToDelete ->
+                                if (newName != null || imageIdsToDelete.isNotEmpty()) {
+                                scope.launch {
+                                    val t = AuthTokenStore.get() ?: return@launch
+                                    if (newName != null && newName.isNotBlank()) {
+                                        val body = JSONObject().put("name", newName)
+                                        BackendClient.put("/albums/$albumId", body, token = t)
+                                            .onSuccess {
+                                                withContext(Dispatchers.Main) {
+                                                    albums = albums.map { if (it.id == albumId) it.copy(name = newName) else it }
+                                                }
+                                            }
+                                    }
+                                    imageIdsToDelete.forEach { photoId ->
+                                        BackendClient.delete("/images/$photoId", token = t)
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        loadAlbumImages()
+                                        Toast.makeText(context, "Changes saved", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                }
+                            },
+                            onSharePhotos = { selectedPhotos ->
+                                scope.launch {
+                                    sharePhotos(context, selectedPhotos)
+                                }
+                            }
                         )
                     }
 
