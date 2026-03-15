@@ -100,6 +100,7 @@ import com.example.mementoandroid.api.BackendClient
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import org.json.JSONArray
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -280,7 +281,14 @@ fun PhotoDetailScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { },
+                title = {
+                    Text(
+                        text = albumName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -487,6 +495,7 @@ fun PhotoDetailScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             if (isEditingLocation) {
+                                // Expanded edit view - keep as is
                                 Text(
                                     text = "Location",
                                     style = MaterialTheme.typography.labelMedium,
@@ -537,8 +546,19 @@ fun PhotoDetailScreen(
                                     Text("Done")
                                 }
                             } else {
+                                // Collapsed view - make entire row clickable, not just the text
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            isEditingLocation = true
+                                            if (editedLocationText.isBlank()) {
+                                                editedLocationText = displayedLocation ?: ""
+                                                editedLatitude = photo.latitude
+                                                editedLongitude = photo.longitude
+                                            }
+                                        }
+                                        .padding(vertical = 4.dp), // Add some padding for better touch target
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -560,15 +580,7 @@ fun PhotoDetailScreen(
                                             else
                                                 "Manually add location",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clickable {
-                                                isEditingLocation = true
-                                                if (editedLocationText.isBlank()) {
-                                                    editedLocationText = displayedLocation ?: ""
-                                                    editedLatitude = photo.latitude
-                                                    editedLongitude = photo.longitude
-                                                }
-                                            }
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }
@@ -585,6 +597,7 @@ fun PhotoDetailScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             if (isEditingTimestamp) {
+                                // Expanded edit view - keep as is
                                 Text(
                                     text = "Date & time",
                                     style = MaterialTheme.typography.labelMedium,
@@ -629,8 +642,12 @@ fun PhotoDetailScreen(
                                     Text("Done")
                                 }
                             } else {
+                                // Collapsed view - make entire row clickable
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isEditingTimestamp = true }
+                                        .padding(vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -657,10 +674,7 @@ fun PhotoDetailScreen(
                                             else
                                                 "Manually add timestamp",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clickable {
-                                                isEditingTimestamp = true
-                                            }
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     }
                                 }

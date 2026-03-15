@@ -108,37 +108,38 @@ fun HomePhotoEntryScreen(
     onBack: () -> Unit,
     onPhotoSaved: (addedToAlbumId: Int?) -> Unit,
     targetAlbumId: Int? = null,
+    albumName: String? = null, // Add album name parameter
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var caption by remember { mutableStateOf("") }
+    var caption by remember(metadata.imageUri) { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
 
     // Date & location from metadata, with optional manual override
-    var displayedLocation by remember { mutableStateOf<String?>(null) }
-    var displayedDateTime by remember { mutableStateOf<String?>(null) }
-    var isEditingLocation by remember { mutableStateOf(false) }
-    var isEditingTimestamp by remember { mutableStateOf(false) }
-    var editedLocationText by remember { mutableStateOf("") }
-    var locationSuggestions by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var editedLatitude by remember { mutableStateOf<Double?>(null) }
-    var editedLongitude by remember { mutableStateOf<Double?>(null) }
-    var editedTakenAt by remember { mutableStateOf("") }
-    var showDatePickerDialog by remember { mutableStateOf(false) }
-    var showTimePickerDialog by remember { mutableStateOf(false) }
-    var pendingDateMillis by remember { mutableStateOf<Long?>(null) }
-    var pendingHour by remember { mutableStateOf<Int?>(null) }
-    var pendingMinute by remember { mutableStateOf<Int?>(null) }
+    var displayedLocation by remember(metadata.imageUri) { mutableStateOf<String?>(null) }
+    var displayedDateTime by remember(metadata.imageUri) { mutableStateOf<String?>(null) }
+    var isEditingLocation by remember(metadata.imageUri) { mutableStateOf(false) }
+    var isEditingTimestamp by remember(metadata.imageUri) { mutableStateOf(false) }
+    var editedLocationText by remember(metadata.imageUri) { mutableStateOf("") }
+    var locationSuggestions by remember(metadata.imageUri) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var editedLatitude by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
+    var editedLongitude by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
+    var editedTakenAt by remember(metadata.imageUri) { mutableStateOf("") }
+    var showDatePickerDialog by remember(metadata.imageUri) { mutableStateOf(false) }
+    var showTimePickerDialog by remember(metadata.imageUri) { mutableStateOf(false) }
+    var pendingDateMillis by remember(metadata.imageUri) { mutableStateOf<Long?>(null) }
+    var pendingHour by remember(metadata.imageUri) { mutableStateOf<Int?>(null) }
+    var pendingMinute by remember(metadata.imageUri) { mutableStateOf<Int?>(null) }
 
     // Voice note (reuse PhotoDetailScreen pattern: record to cache, play, delete, re-record)
-    var recordedAudioPath by remember { mutableStateOf<String?>(null) }
-    var isRecording by remember { mutableStateOf(false) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-    val mediaPlayerHolder = remember { object { var current: MediaPlayer? = null } }
-    val stopChannel = remember { Channel<Unit>(Channel.CONFLATED) }
+    var recordedAudioPath by remember(metadata.imageUri) { mutableStateOf<String?>(null) }
+    var isRecording by remember(metadata.imageUri) { mutableStateOf(false) }
+    var isPlaying by remember(metadata.imageUri) { mutableStateOf(false) }
+    var mediaPlayer by remember(metadata.imageUri) { mutableStateOf<MediaPlayer?>(null) }
+    val mediaPlayerHolder = remember(metadata.imageUri) { object { var current: MediaPlayer? = null } }
+    val stopChannel = remember(metadata.imageUri) { Channel<Unit>(Channel.CONFLATED) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -205,8 +206,8 @@ fun HomePhotoEntryScreen(
                     val date = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(it)
                     date?.let { d -> SimpleDateFormat("MMM dd, yyyy · h:mm a", Locale.US).format(d) }
                 } catch (_: Exception) { null }
-                } ?: it
-            } ?: null
+            } ?: it
+        } ?: null
     }
 
     // When entering timestamp edit mode, init pending date/time from current value
@@ -314,7 +315,15 @@ fun HomePhotoEntryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (targetAlbumId != null) "Add to album" else "Add to Memento") },
+                title = {
+                    Text(
+                        when {
+                            targetAlbumId != null && !albumName.isNullOrBlank() -> "Add to $albumName"
+                            targetAlbumId != null -> "Add to album"
+                            else -> "Add to My Photos"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Default.ArrowBack, "Back")
@@ -408,7 +417,7 @@ fun HomePhotoEntryScreen(
                 }
             }
 
-            // Location: show value or "Location not available" / "Location not quite right?" with manual add
+            // Location card - make entire row clickable
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -418,6 +427,7 @@ fun HomePhotoEntryScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         if (isEditingLocation) {
+                            // Expanded edit view
                             Text(
                                 text = "Location",
                                 style = MaterialTheme.typography.labelMedium,
@@ -466,8 +476,17 @@ fun HomePhotoEntryScreen(
                                 Text("Done")
                             }
                         } else {
+                            // Collapsed view - entire row clickable
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        isEditingLocation = true
+                                        editedLocationText = displayedLocation ?: ""
+                                        editedLatitude = metadata.latitude
+                                        editedLongitude = metadata.longitude
+                                    }
+                                    .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -489,13 +508,7 @@ fun HomePhotoEntryScreen(
                                         else
                                             "Manually add location",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.clickable {
-                                            isEditingLocation = true
-                                            editedLocationText = displayedLocation ?: ""
-                                            editedLatitude = metadata.latitude
-                                            editedLongitude = metadata.longitude
-                                        }
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -504,7 +517,7 @@ fun HomePhotoEntryScreen(
                 }
             }
 
-            // Date & time: show value or "Timestamp not available" with manual add
+            // Date & time card - make entire row clickable
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -514,6 +527,7 @@ fun HomePhotoEntryScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         if (isEditingTimestamp) {
+                            // Expanded edit view
                             Text(
                                 text = "Date & time",
                                 style = MaterialTheme.typography.labelMedium,
@@ -563,8 +577,15 @@ fun HomePhotoEntryScreen(
                                 Text("Done")
                             }
                         } else {
+                            // Collapsed view - entire row clickable
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        isEditingTimestamp = true
+                                        editedTakenAt = metadata.takenAt ?: ""
+                                    }
+                                    .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
@@ -586,11 +607,7 @@ fun HomePhotoEntryScreen(
                                         else
                                             "Manually add timestamp",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.clickable {
-                                            isEditingTimestamp = true
-                                            editedTakenAt = metadata.takenAt ?: ""
-                                        }
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -599,7 +616,7 @@ fun HomePhotoEntryScreen(
                 }
             }
 
-            // Voice note: record / play / delete / re-record (no "No voice note" label)
+            // Voice note card
             item {
                 val hasRecording = !recordedAudioPath.isNullOrBlank()
                 Card(
@@ -710,6 +727,7 @@ fun HomePhotoEntryScreen(
                 }
             }
 
+            // Caption field
             item {
                 OutlinedTextField(
                     value = caption,

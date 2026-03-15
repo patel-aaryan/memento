@@ -15,19 +15,25 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -36,7 +42,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -50,12 +55,11 @@ import com.example.mementoandroid.ui.album.AlbumScreen
 import com.example.mementoandroid.ui.album.AlbumSort
 import com.example.mementoandroid.ui.album.AlbumSortKind
 import com.example.mementoandroid.ui.album.AlbumUi
-import com.example.mementoandroid.ui.album.sortedAndFiltered
-import com.example.mementoandroid.ui.album.CreateAlbumScreen
 import com.example.mementoandroid.ui.album.FriendUi
 import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
 import com.example.mementoandroid.ui.album.components.FriendPickerScreen
+import com.example.mementoandroid.ui.album.sortedAndFiltered
 import com.example.mementoandroid.ui.home.HomeAddAction
 import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
 import com.example.mementoandroid.ui.home.HomePhotoMetadata
@@ -68,9 +72,9 @@ import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
 import com.example.mementoandroid.util.exifDateTimeToIso
-import com.example.mementoandroid.util.sharePhotos
 import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
+import com.example.mementoandroid.util.sharePhotos
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
@@ -167,7 +171,11 @@ class MainActivity : ComponentActivity() {
                 var pendingMultiplePhotos by remember { mutableStateOf<List<SelectedImage>?>(null) }
                 var currentMultiPhotoIndex by remember { mutableStateOf(0) }
 
-                var showCreateAlbum by rememberSaveable { mutableStateOf(false) }
+                // States for album creation dialog
+                var showCreateAlbumDialog by rememberSaveable { mutableStateOf(false) }
+                var newAlbumName by rememberSaveable { mutableStateOf("") }
+                var isCreatingAlbum by remember { mutableStateOf(false) }
+
                 var showFriendPicker by remember { mutableStateOf(false) }
                 var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
                 var albumShowMap by rememberSaveable { mutableStateOf(false) }
@@ -585,7 +593,10 @@ class MainActivity : ComponentActivity() {
                     when (action) {
                         HomeAddAction.Camera -> launchCamera(null)
                         HomeAddAction.Photos -> pickMultiplePhotosLauncher.launch("image/*")
-                        HomeAddAction.MakeAlbum -> showCreateAlbum = true
+                        HomeAddAction.MakeAlbum -> {
+                            showCreateAlbumDialog = true
+                            newAlbumName = ""
+                        }
                     }
                 }
 
@@ -593,486 +604,622 @@ class MainActivity : ComponentActivity() {
 
                 @OptIn(ExperimentalMaterial3Api::class)
                 Box(Modifier.fillMaxSize()) {
-                when {
-                    showFriendPicker && pendingAlbumIdForFriend != null -> {
-                        BackHandler {
-                            showFriendPicker = false
-                            pendingAlbumIdForFriend = null
-                        }
-                        FriendPickerScreen(
-                            albumId = pendingAlbumIdForFriend!!,
-                            currentFriends = if (selectedAlbumId != null) albumMembers else emptyList(),
-                            onBack = {
-                                showFriendPicker = false
-                                pendingAlbumIdForFriend = null
-                            },
-                            onFriendsAdded = { newFriends ->
-                                if (selectedAlbumId != null) {
-                                    // Update existing album's friends list
-                                    albumMembers = albumMembers + newFriends
-                                }
+                    when {
+                        showFriendPicker && pendingAlbumIdForFriend != null -> {
+                            BackHandler {
                                 showFriendPicker = false
                                 pendingAlbumIdForFriend = null
                             }
-                        )
-                    }
+                            FriendPickerScreen(
+                                albumId = pendingAlbumIdForFriend!!,
+                                currentFriends = if (selectedAlbumId != null) albumMembers else emptyList(),
+                                onBack = {
+                                    showFriendPicker = false
+                                    pendingAlbumIdForFriend = null
+                                },
+                                onFriendsAdded = { newFriends ->
+                                    if (selectedAlbumId != null) {
+                                        // Update existing album's friends list
+                                        albumMembers = albumMembers + newFriends
+                                    }
+                                    showFriendPicker = false
+                                    pendingAlbumIdForFriend = null
+                                }
+                            )
+                        }
 
-                    showCreateAlbum -> {
-                        BackHandler { showCreateAlbum = false }
-                        CreateAlbumScreen(
-                            onBack = { showCreateAlbum = false },
-                            onAlbumCreated = { albumId, albumName ->
-                                scope.launch {
-                                    val t = AuthTokenStore.get()
-                                    if (t != null) {
-                                        BackendClient.getArray("/albums", t)
-                                            .onSuccess { arr ->
-                                                val list = (0 until arr.length()).map { i ->
-                                                    val o = arr.getJSONObject(i)
-                                                    val coverUrls = if (o.has("cover_image_urls")) {
-                                                        val a = o.getJSONArray("cover_image_urls")
-                                                        (0 until a.length()).map { j -> a.getString(j) }
-                                                    } else emptyList()
-                                                    AlbumUi(
-                                                        id = o.getInt("id"),
-                                                        name = o.getString("name"),
-                                                        ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
-                                                        coverImageUrls = coverUrls
-                                                    )
-                                                }
+                        pendingAlbumPhotoEntry != null -> {
+                            BackHandler {
+                                // Skip current photo and move to next
+                                pendingMultiplePhotos?.let { photos ->
+                                    val nextIndex = currentMultiPhotoIndex + 1
+                                    if (nextIndex < photos.size) {
+                                        val nextPhoto = photos[nextIndex]
+                                        scope.launch(Dispatchers.IO) {
+                                            val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                            val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                            withContext(Dispatchers.Main) {
+                                                val meta = HomePhotoMetadata(
+                                                    latitude = metadata?.latitude,
+                                                    longitude = metadata?.longitude,
+                                                    takenAt = takenAt,
+                                                    imageUri = nextPhoto.uri,
+                                                    imageFile = nextPhoto.file
+                                                )
+                                                pendingAlbumPhotoEntry = Pair(meta, selectedAlbumId!!)
+                                                currentMultiPhotoIndex = nextIndex
+                                            }
+                                        }
+                                    } else {
+                                        pendingMultiplePhotos = null
+                                        currentMultiPhotoIndex = 0
+                                        pendingAlbumPhotoEntry = null
+                                        loadAlbumImages()
+                                    }
+                                } ?: run {
+                                    pendingAlbumPhotoEntry = null
+                                }
+                            }
+                            HomePhotoEntryScreen(
+                                metadata = pendingAlbumPhotoEntry!!.first,
+                                targetAlbumId = pendingAlbumPhotoEntry!!.second,
+                                albumName = selectedAlbumName,
+                                onBack = {
+                                    pendingMultiplePhotos?.let { photos ->
+                                        val nextIndex = currentMultiPhotoIndex + 1
+                                        if (nextIndex < photos.size) {
+                                            val nextPhoto = photos[nextIndex]
+                                            scope.launch(Dispatchers.IO) {
+                                                val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                                val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                    ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
                                                 withContext(Dispatchers.Main) {
-                                                    albums = list
-                                                    selectedAlbumId = albumId
+                                                    val meta = HomePhotoMetadata(
+                                                        latitude = metadata?.latitude,
+                                                        longitude = metadata?.longitude,
+                                                        takenAt = takenAt,
+                                                        imageUri = nextPhoto.uri,
+                                                        imageFile = nextPhoto.file
+                                                    )
+                                                    pendingAlbumPhotoEntry = Pair(meta, selectedAlbumId!!)
+                                                    currentMultiPhotoIndex = nextIndex
                                                 }
                                             }
+                                        } else {
+                                            pendingMultiplePhotos = null
+                                            currentMultiPhotoIndex = 0
+                                            pendingAlbumPhotoEntry = null
+                                            loadAlbumImages()
+                                        }
+                                    } ?: run {
+                                        pendingAlbumPhotoEntry = null
+                                    }
+                                },
+                                onPhotoSaved = { addedToAlbumId ->
+                                    pendingMultiplePhotos?.let { photos ->
+                                        val nextIndex = currentMultiPhotoIndex + 1
+                                        if (nextIndex < photos.size) {
+                                            val nextPhoto = photos[nextIndex]
+                                            scope.launch(Dispatchers.IO) {
+                                                val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                                val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                    ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                                withContext(Dispatchers.Main) {
+                                                    val meta = HomePhotoMetadata(
+                                                        latitude = metadata?.latitude,
+                                                        longitude = metadata?.longitude,
+                                                        takenAt = takenAt,
+                                                        imageUri = nextPhoto.uri,
+                                                        imageFile = nextPhoto.file
+                                                    )
+                                                    pendingAlbumPhotoEntry = Pair(meta, selectedAlbumId!!)
+                                                    currentMultiPhotoIndex = nextIndex
+                                                }
+                                            }
+                                        } else {
+                                            pendingMultiplePhotos = null
+                                            currentMultiPhotoIndex = 0
+                                            pendingAlbumPhotoEntry = null
+                                            loadAlbumImages()
+                                        }
+                                    } ?: run {
+                                        pendingAlbumPhotoEntry = null
+                                        if (addedToAlbumId != null) loadAlbumImages()
                                     }
                                 }
-                            },
-                            onAddFriend = { albumId ->
-                                pendingAlbumIdForFriend = albumId
-                                showFriendPicker = true
-                            },
-                            onAddPhoto = ::onAddPhoto,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    pendingAlbumPhotoEntry != null -> {
-                        BackHandler {
-                            pendingAlbumPhotoEntry = null
-                            // If we have multiple photos pending, move to next after cancel
-                            pendingMultiplePhotos?.let { photos ->
-                                val nextIndex = currentMultiPhotoIndex + 1
-                                if (nextIndex < photos.size) {
-                                    processNextPhoto(photos, nextIndex, selectedAlbumId)
-                                } else {
-                                    pendingMultiplePhotos = null
-                                    currentMultiPhotoIndex = 0
-                                    loadAlbumImages() // Refresh album view
-                                }
-                            }
+                            )
                         }
-                        HomePhotoEntryScreen(
-                            metadata = pendingAlbumPhotoEntry!!.first,
-                            targetAlbumId = pendingAlbumPhotoEntry!!.second,
-                            onBack = {
-                                pendingAlbumPhotoEntry = null
-                                // If we have multiple photos pending, move to next after cancel
-                                pendingMultiplePhotos?.let { photos ->
-                                    val nextIndex = currentMultiPhotoIndex + 1
-                                    if (nextIndex < photos.size) {
-                                        processNextPhoto(photos, nextIndex, selectedAlbumId)
-                                    } else {
-                                        pendingMultiplePhotos = null
-                                        currentMultiPhotoIndex = 0
-                                        loadAlbumImages() // Refresh album view
-                                    }
-                                }
-                            },
-                            onPhotoSaved = { addedToAlbumId ->
-                                pendingAlbumPhotoEntry = null
-                                // After saving one photo, process the next one
-                                pendingMultiplePhotos?.let { photos ->
-                                    val nextIndex = currentMultiPhotoIndex + 1
-                                    if (nextIndex < photos.size) {
-                                        processNextPhoto(photos, nextIndex, selectedAlbumId)
-                                    } else {
-                                        pendingMultiplePhotos = null
-                                        currentMultiPhotoIndex = 0
-                                        loadAlbumImages() // Refresh album view
-                                    }
-                                }
 
-                                if (addedToAlbumId != null) {
-                                    loadAlbumImages() // Refresh album view
-                                }
-                            }
-                        )
-                    }
-
-                    pendingHomePhotoEntry != null -> {
-                        BackHandler {
-                            pendingHomePhotoEntry = null
-                            // If we have multiple photos pending, move to next after cancel
-                            pendingMultiplePhotos?.let { photos ->
-                                val nextIndex = currentMultiPhotoIndex + 1
-                                if (nextIndex < photos.size) {
-                                    processNextPhoto(photos, nextIndex) // No album ID for home
-                                } else {
-                                    pendingMultiplePhotos = null
-                                    currentMultiPhotoIndex = 0
-                                    refreshHomeData()
-                                }
-                            }
-                        }
-                        HomePhotoEntryScreen(
-                            metadata = pendingHomePhotoEntry!!,
-                            onBack = {
-                                pendingHomePhotoEntry = null
-                                // If we have multiple photos pending, move to next after cancel
+                        pendingHomePhotoEntry != null -> {
+                            BackHandler {
                                 pendingMultiplePhotos?.let { photos ->
                                     val nextIndex = currentMultiPhotoIndex + 1
                                     if (nextIndex < photos.size) {
-                                        processNextPhoto(photos, nextIndex) // No album ID for home
+                                        val nextPhoto = photos[nextIndex]
+                                        scope.launch(Dispatchers.IO) {
+                                            val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                            val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                            withContext(Dispatchers.Main) {
+                                                val meta = HomePhotoMetadata(
+                                                    latitude = metadata?.latitude,
+                                                    longitude = metadata?.longitude,
+                                                    takenAt = takenAt,
+                                                    imageUri = nextPhoto.uri,
+                                                    imageFile = nextPhoto.file
+                                                )
+                                                pendingHomePhotoEntry = meta
+                                                currentMultiPhotoIndex = nextIndex
+                                            }
+                                        }
                                     } else {
                                         pendingMultiplePhotos = null
                                         currentMultiPhotoIndex = 0
+                                        pendingHomePhotoEntry = null
                                         refreshHomeData()
                                     }
+                                } ?: run {
+                                    pendingHomePhotoEntry = null
                                 }
-                            },
-                            onPhotoSaved = { addedToAlbumId ->
-                                pendingHomePhotoEntry = null
-                                // After saving one photo, process the next one
-                                pendingMultiplePhotos?.let { photos ->
-                                    val nextIndex = currentMultiPhotoIndex + 1
-                                    if (nextIndex < photos.size) {
-                                        processNextPhoto(photos, nextIndex) // No album ID for home
-                                    } else {
-                                        pendingMultiplePhotos = null
-                                        currentMultiPhotoIndex = 0
-                                        refreshHomeData()
+                            }
+                            HomePhotoEntryScreen(
+                                metadata = pendingHomePhotoEntry!!,
+                                onBack = {
+                                    pendingMultiplePhotos?.let { photos ->
+                                        val nextIndex = currentMultiPhotoIndex + 1
+                                        if (nextIndex < photos.size) {
+                                            val nextPhoto = photos[nextIndex]
+                                            scope.launch(Dispatchers.IO) {
+                                                val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                                val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                    ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                                withContext(Dispatchers.Main) {
+                                                    val meta = HomePhotoMetadata(
+                                                        latitude = metadata?.latitude,
+                                                        longitude = metadata?.longitude,
+                                                        takenAt = takenAt,
+                                                        imageUri = nextPhoto.uri,
+                                                        imageFile = nextPhoto.file
+                                                    )
+                                                    pendingHomePhotoEntry = meta
+                                                    currentMultiPhotoIndex = nextIndex
+                                                }
+                                            }
+                                        } else {
+                                            pendingMultiplePhotos = null
+                                            currentMultiPhotoIndex = 0
+                                            pendingHomePhotoEntry = null
+                                            refreshHomeData()
+                                        }
+                                    } ?: run {
+                                        pendingHomePhotoEntry = null
+                                    }
+                                },
+                                onPhotoSaved = { addedToAlbumId ->
+                                    pendingMultiplePhotos?.let { photos ->
+                                        val nextIndex = currentMultiPhotoIndex + 1
+                                        if (nextIndex < photos.size) {
+                                            val nextPhoto = photos[nextIndex]
+                                            scope.launch(Dispatchers.IO) {
+                                                val metadata = extractPhotoMetadata(context, nextPhoto.uri)
+                                                val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
+                                                    ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                                withContext(Dispatchers.Main) {
+                                                    val meta = HomePhotoMetadata(
+                                                        latitude = metadata?.latitude,
+                                                        longitude = metadata?.longitude,
+                                                        takenAt = takenAt,
+                                                        imageUri = nextPhoto.uri,
+                                                        imageFile = nextPhoto.file
+                                                    )
+                                                    pendingHomePhotoEntry = meta
+                                                    currentMultiPhotoIndex = nextIndex
+                                                }
+                                            }
+                                        } else {
+                                            pendingMultiplePhotos = null
+                                            currentMultiPhotoIndex = 0
+                                            pendingHomePhotoEntry = null
+                                            refreshHomeData()
+                                        }
+                                    } ?: run {
+                                        pendingHomePhotoEntry = null
+                                        if (addedToAlbumId == null) refreshHomeData()
                                     }
                                 }
+                            )
+                        }
 
-                                if (addedToAlbumId == null) {
-                                    refreshHomeData()
+                        selectedAlbumId != null && selectedPhotoId != null -> {
+                            val filteredAlbumPhotos = photos.sortedAndFiltered(albumSort)
+                            LaunchedEffect(selectedPhotoId, filteredAlbumPhotos) {
+                                selectedPhotoId?.let { id ->
+                                    val idx = filteredAlbumPhotos.indexOfFirst { it.id == id }
+                                    if (idx >= 0) currentPhotoIndex = idx
                                 }
                             }
-                        )
-                    }
-
-                    selectedAlbumId != null && selectedPhotoId != null -> {
-                        val filteredAlbumPhotos = photos.sortedAndFiltered(albumSort)
-                        LaunchedEffect(selectedPhotoId, filteredAlbumPhotos) {
-                            selectedPhotoId?.let { id ->
-                                val idx = filteredAlbumPhotos.indexOfFirst { it.id == id }
-                                if (idx >= 0) currentPhotoIndex = idx
+                            BackHandler {
+                                if (photoDetailFromStandalone) {
+                                    selectedPhotoId = null
+                                    selectedAlbumId = null
+                                    photoDetailFromStandalone = false
+                                } else {
+                                    selectedPhotoId = null
+                                }
                             }
-                        }
-                        BackHandler {
-                            if (photoDetailFromStandalone) {
-                                selectedPhotoId = null
-                                selectedAlbumId = null
-                                photoDetailFromStandalone = false
+                            val albumName = selectedAlbumName ?: ""
+                            val photo = filteredAlbumPhotos.getOrNull(currentPhotoIndex) ?: filteredAlbumPhotos.find { it.id == selectedPhotoId }
+                            if (photo != null) {
+                                val photoToDelete = photo
+                                val albumOwnerId = selectedAlbumId?.let { aid -> albums.find { it.id == aid }?.ownerId }
+                                val currentUserId = AuthTokenStore.getUserId()
+                                val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
+                                        (photoToDelete.userId != null && currentUserId != null && currentUserId == photoToDelete.userId)
+                                PhotoDetailScreen(
+                                    photo = photoToDelete,
+                                    albumName = albumName,
+                                    mock = getPhotoDetailMock(albumName, photoToDelete.id),
+                                    onBack = {
+                                        if (photoDetailFromStandalone) {
+                                            selectedPhotoId = null
+                                            selectedAlbumId = null
+                                            photoDetailFromStandalone = false
+                                        } else {
+                                            selectedPhotoId = null
+                                        }
+                                    },
+                                    canDeletePhoto = canDeletePhoto,
+                                    allPhotos = if (filteredAlbumPhotos.size > 1) filteredAlbumPhotos else null,
+                                    currentPhotoIndex = currentPhotoIndex,
+                                    onPhotoIndexChange = { currentPhotoIndex = it.coerceIn(0, filteredAlbumPhotos.size - 1) },
+                                    onDeleteAudio = {
+                                        scope.launch {
+                                            val t = AuthTokenStore.get() ?: return@launch
+                                            val body = JSONObject().put("audio_url", JSONObject.NULL)
+                                            val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { handle401(context, it) }
+                                                if (result.isSuccess) loadAlbumImages()
+                                                Toast.makeText(
+                                                    context,
+                                                    if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
+                                        scope.launch {
+                                            val t = AuthTokenStore.get() ?: return@launch
+                                            var audioUrl: String? = null
+                                            if (!audioFilePath.isNullOrBlank()) {
+                                                val file = java.io.File(audioFilePath)
+                                                if (file.exists()) {
+                                                    audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
+                                                }
+                                            }
+                                            val body = JSONObject().apply {
+                                                put("caption", caption)
+                                                takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
+                                                latitude?.let { put("latitude", it) }
+                                                longitude?.let { put("longitude", it) }
+                                                audioUrl?.let { put("audio_url", it) }
+                                            }
+                                            val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { handle401(context, it) }
+                                                if (result.isSuccess) loadAlbumImages()
+                                                Toast.makeText(
+                                                    context,
+                                                    if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                    onDeletePhoto = {
+                                        scope.launch {
+                                            val t = AuthTokenStore.get()
+                                            withContext(Dispatchers.Main) {
+                                                if (t == null) {
+                                                    Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
+                                                    return@withContext
+                                                }
+                                            }
+                                            val result = BackendClient.delete("/images/${photoToDelete.id}", token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { e ->
+                                                    handle401(context, e)
+                                                    Toast.makeText(
+                                                        context,
+                                                        (e as? BackendException)?.message ?: "Failed to delete",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                                if (result.isSuccess) {
+                                                    photos.removeAll { it.id == photoToDelete.id }
+                                                    selectedPhotoId = null
+                                                    if (photoDetailFromStandalone) {
+                                                        selectedAlbumId = null
+                                                        photoDetailFromStandalone = false
+                                                    }
+                                                    Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
                             } else {
                                 selectedPhotoId = null
                             }
                         }
-                        val albumName = selectedAlbumName ?: ""
-                        val photo = filteredAlbumPhotos.getOrNull(currentPhotoIndex) ?: filteredAlbumPhotos.find { it.id == selectedPhotoId }
-                        if (photo != null) {
-                            val photoToDelete = photo
-                            val albumOwnerId = selectedAlbumId?.let { aid -> albums.find { it.id == aid }?.ownerId }
-                            val currentUserId = AuthTokenStore.getUserId()
-                            val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
-                                    (photoToDelete.userId != null && currentUserId != null && currentUserId == photoToDelete.userId)
-                            PhotoDetailScreen(
-                                photo = photoToDelete,
-                                albumName = albumName,
-                                mock = getPhotoDetailMock(albumName, photoToDelete.id),
-                                onBack = {
-                                    if (photoDetailFromStandalone) {
-                                        selectedPhotoId = null
-                                        selectedAlbumId = null
-                                        photoDetailFromStandalone = false
-                                    } else {
-                                        selectedPhotoId = null
-                                    }
-                                },
-                                canDeletePhoto = canDeletePhoto,
-                                allPhotos = if (filteredAlbumPhotos.size > 1) filteredAlbumPhotos else null,
-                                currentPhotoIndex = currentPhotoIndex,
-                                onPhotoIndexChange = { currentPhotoIndex = it.coerceIn(0, filteredAlbumPhotos.size - 1) },
-                                onDeleteAudio = {
-                                    scope.launch {
-                                        val t = AuthTokenStore.get() ?: return@launch
-                                        val body = JSONObject().put("audio_url", JSONObject.NULL)
-                                        val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
-                                        withContext(Dispatchers.Main) {
-                                            result.onFailure { handle401(context, it) }
-                                            if (result.isSuccess) loadAlbumImages()
-                                            Toast.makeText(
-                                                context,
-                                                if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    }
-                                },
-                                onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
-                                    scope.launch {
-                                        val t = AuthTokenStore.get() ?: return@launch
-                                        var audioUrl: String? = null
-                                        if (!audioFilePath.isNullOrBlank()) {
-                                            val file = java.io.File(audioFilePath)
-                                            if (file.exists()) {
-                                                audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
-                                            }
-                                        }
-                                        val body = JSONObject().apply {
-                                            put("caption", caption)
-                                            takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
-                                            latitude?.let { put("latitude", it) }
-                                            longitude?.let { put("longitude", it) }
-                                            audioUrl?.let { put("audio_url", it) }
-                                        }
-                                        val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
-                                        withContext(Dispatchers.Main) {
-                                            result.onFailure { handle401(context, it) }
-                                            if (result.isSuccess) loadAlbumImages()
-                                            Toast.makeText(
-                                                context,
-                                                if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    }
-                                },
-                                onDeletePhoto = {
-                                    scope.launch {
-                                        val t = AuthTokenStore.get()
-                                        withContext(Dispatchers.Main) {
-                                            if (t == null) {
-                                                Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
-                                                return@withContext
-                                            }
-                                        }
-                                        val result = BackendClient.delete("/images/${photoToDelete.id}", token = t)
-                                        withContext(Dispatchers.Main) {
-                                            result.onFailure { e ->
-                                                handle401(context, e)
-                                                Toast.makeText(
-                                                    context,
-                                                    (e as? BackendException)?.message ?: "Failed to delete",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                            if (result.isSuccess) {
-                                                photos.removeAll { it.id == photoToDelete.id }
-                                                selectedPhotoId = null
-                                                if (photoDetailFromStandalone) {
-                                                    selectedAlbumId = null
-                                                    photoDetailFromStandalone = false
-                                                }
-                                                Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
-                                }
-                            )
-                        } else {
-                            selectedPhotoId = null
-                        }
-                    }
 
-                    selectedAlbumId != null -> {
-                        val albumId = selectedAlbumId!!
-                        val currentUserId = AuthTokenStore.getUserId()
-                        val isAlbumOwner = albums.find { it.id == albumId }?.ownerId?.let { it == currentUserId } == true
-                        if (showDeleteAlbumDialog) {
-                            AlertDialog(
-                                onDismissRequest = { showDeleteAlbumDialog = false },
-                                title = { Text(if (isAlbumOwner) "Delete album?" else "Remove album?") },
-                                text = {
-                                    Text(
-                                        if (isAlbumOwner)
-                                            "This album will be deleted for everyone. This cannot be undone."
-                                        else
-                                            "This will remove the album from your list only. Others will still see it."
-                                    )
+                        selectedAlbumId != null -> {
+                            val albumId = selectedAlbumId!!
+                            val currentUserId = AuthTokenStore.getUserId()
+                            val isAlbumOwner = albums.find { it.id == albumId }?.ownerId?.let { it == currentUserId } == true
+                            if (showDeleteAlbumDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showDeleteAlbumDialog = false },
+                                    title = { Text(if (isAlbumOwner) "Delete album?" else "Remove album?") },
+                                    text = {
+                                        Text(
+                                            if (isAlbumOwner)
+                                                "This album will be deleted for everyone. This cannot be undone."
+                                            else
+                                                "This will remove the album from your list only. Others will still see it."
+                                        )
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            showDeleteAlbumDialog = false
+                                            scope.launch {
+                                                val t = AuthTokenStore.get() ?: return@launch
+                                                val path = if (isAlbumOwner) "/albums/$albumId" else "/albums/$albumId/leave"
+                                                val result = BackendClient.delete(path, token = t)
+                                                withContext(Dispatchers.Main) {
+                                                    result.onFailure { handle401(context, it); return@withContext }
+                                                    selectedAlbumId = null
+                                                    BackendClient.getArray("/albums", t)
+                                                        .onSuccess { arr ->
+                                                            val list = (0 until arr.length()).map { i ->
+                                                                val o = arr.getJSONObject(i)
+                                                                val coverUrls = if (o.has("cover_image_urls")) {
+                                                                    val a = o.getJSONArray("cover_image_urls")
+                                                                    (0 until a.length()).map { j -> a.getString(j) }
+                                                                } else emptyList()
+                                                                AlbumUi(
+                                                                    id = o.getInt("id"),
+                                                                    name = o.getString("name"),
+                                                                    ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
+                                                                    coverImageUrls = coverUrls
+                                                                )
+                                                            }
+                                                            albums = list
+                                                        }
+                                                    Toast.makeText(
+                                                        context,
+                                                        if (isAlbumOwner) "Album deleted" else "Album removed from your list",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        }) {
+                                            Text(if (isAlbumOwner) "Delete" else "Remove", color = MaterialTheme.colorScheme.error)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showDeleteAlbumDialog = false }) {
+                                            Text("Cancel")
+                                        }
+                                    }
+                                )
+                            }
+                            val filteredAlbumPhotos = photos.sortedAndFiltered(albumSort)
+                            AlbumScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                albumName = selectedAlbumName ?: "",
+                                photos = filteredAlbumPhotos,
+                                friends = albumMembers,
+                                isSharedAlbum = albumMembers.isNotEmpty(),
+                                showMap = albumShowMap,
+                                onShowMapChange = { albumShowMap = it },
+                                sort = albumSort,
+                                onSortChange = { newSort ->
+                                    albumSort = newSort
+                                    AlbumSortStore.save(albumId, newSort)
                                 },
-                                confirmButton = {
-                                    TextButton(onClick = {
-                                        showDeleteAlbumDialog = false
+                                currentUserId = AuthTokenStore.getUserId(),
+                                isAlbumOwner = isAlbumOwner,
+                                onBack = { selectedAlbumId = null },
+                                onEditAlbumName = {},
+                                onSaveAlbumName = { },
+                                onDeleteAlbum = { showDeleteAlbumDialog = true },
+                                onAddFriend = {
+                                    pendingAlbumIdForFriend = albumId
+                                    showFriendPicker = true
+                                },
+                                onPhotoClick = { selectedPhotoId = it },
+                                onAddPhoto = ::onAddPhoto,
+                                onSaveEdits = { newName, imageIdsToDelete ->
+                                    if (newName != null || imageIdsToDelete.isNotEmpty()) {
                                         scope.launch {
                                             val t = AuthTokenStore.get() ?: return@launch
-                                            val path = if (isAlbumOwner) "/albums/$albumId" else "/albums/$albumId/leave"
-                                            val result = BackendClient.delete(path, token = t)
-                                            withContext(Dispatchers.Main) {
-                                                result.onFailure { handle401(context, it); return@withContext }
-                                                selectedAlbumId = null
-                                                BackendClient.getArray("/albums", t)
-                                                    .onSuccess { arr ->
-                                                        val list = (0 until arr.length()).map { i ->
-                                                            val o = arr.getJSONObject(i)
-                                                            val coverUrls = if (o.has("cover_image_urls")) {
-                                                                val a = o.getJSONArray("cover_image_urls")
-                                                                (0 until a.length()).map { j -> a.getString(j) }
-                                                            } else emptyList()
-                                                            AlbumUi(
-                                                                id = o.getInt("id"),
-                                                                name = o.getString("name"),
-                                                                ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
-                                                                coverImageUrls = coverUrls
-                                                            )
+                                            if (newName != null && newName.isNotBlank()) {
+                                                val body = JSONObject().put("name", newName)
+                                                BackendClient.put("/albums/$albumId", body, token = t)
+                                                    .onSuccess {
+                                                        withContext(Dispatchers.Main) {
+                                                            albums = albums.map { if (it.id == albumId) it.copy(name = newName) else it }
                                                         }
-                                                        albums = list
                                                     }
-                                                Toast.makeText(
-                                                    context,
-                                                    if (isAlbumOwner) "Album deleted" else "Album removed from your list",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
+                                            }
+                                            imageIdsToDelete.forEach { photoId ->
+                                                BackendClient.delete("/images/$photoId", token = t)
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                loadAlbumImages()
+                                                Toast.makeText(context, "Changes saved", Toast.LENGTH_SHORT).show()
                                             }
                                         }
-                                    }) {
-                                        Text(if (isAlbumOwner) "Delete" else "Remove", color = MaterialTheme.colorScheme.error)
                                     }
                                 },
-                                dismissButton = {
-                                    TextButton(onClick = { showDeleteAlbumDialog = false }) {
-                                        Text("Cancel")
+                                onSharePhotos = { selectedPhotos ->
+                                    scope.launch {
+                                        sharePhotos(context, selectedPhotos)
                                     }
                                 }
                             )
                         }
-                        val filteredAlbumPhotos = photos.sortedAndFiltered(albumSort)
-                        AlbumScreen(
-                            modifier = Modifier.fillMaxSize(),
-                            albumName = selectedAlbumName ?: "",
-                            photos = filteredAlbumPhotos,
-                            friends = albumMembers,
-                            isSharedAlbum = albumMembers.isNotEmpty(),
-                            showMap = albumShowMap,
-                            onShowMapChange = { albumShowMap = it },
-                            sort = albumSort,
-                            onSortChange = { newSort ->
-                                albumSort = newSort
-                                AlbumSortStore.save(albumId, newSort)
+
+                        else -> {
+                            HomeScreen(
+                                albums = albums,
+                                standalonePhotos = standalonePhotos,
+                                myPhotosAlbumId = myPhotosAlbumId,
+                                profilePictureUrl = currentUserProfilePictureUrl,
+                                onProfileClick = { profileLauncher.launch(Intent(context, ProfileActivity::class.java)) },
+                                onAlbumClick = {
+                                    selectedAlbumId = it
+                                    photoDetailFromStandalone = false
+                                },
+                                onStandalonePhotoClick = { photo ->
+                                    val aid = myPhotosAlbumId
+                                    if (aid != null) {
+                                        selectedAlbumId = aid
+                                        selectedPhotoId = photo.id
+                                        photos.clear()
+                                        photos.addAll(standalonePhotos)
+                                        photoDetailFromStandalone = true
+                                    }
+                                },
+                                onAction = ::onHomeAction
+                            )
+                        }
+                    }
+
+                    // New album creation dialog
+                    if (showCreateAlbumDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showCreateAlbumDialog = false },
+                            title = { Text("Create new album") },
+                            text = {
+                                OutlinedTextField(
+                                    value = newAlbumName,
+                                    onValueChange = { newAlbumName = it },
+                                    label = { Text("Album name") },
+                                    singleLine = true,
+                                    enabled = !isCreatingAlbum
+                                )
                             },
-                            currentUserId = AuthTokenStore.getUserId(),
-                            isAlbumOwner = isAlbumOwner,
-                            onBack = { selectedAlbumId = null },
-                            onEditAlbumName = {},
-                            onSaveAlbumName = { },
-                            onDeleteAlbum = { showDeleteAlbumDialog = true },
-                            onAddFriend = {
-                                pendingAlbumIdForFriend = albumId
-                                showFriendPicker = true
-                            },
-                            onPhotoClick = { selectedPhotoId = it },
-                            onAddPhoto = ::onAddPhoto,
-                            onSaveEdits = { newName, imageIdsToDelete ->
-                                if (newName != null || imageIdsToDelete.isNotEmpty()) {
-                                scope.launch {
-                                    val t = AuthTokenStore.get() ?: return@launch
-                                    if (newName != null && newName.isNotBlank()) {
-                                        val body = JSONObject().put("name", newName)
-                                        BackendClient.put("/albums/$albumId", body, token = t)
-                                            .onSuccess {
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        if (newAlbumName.isBlank()) return@TextButton
+                                        isCreatingAlbum = true
+                                        scope.launch {
+                                            val token = AuthTokenStore.get()
+                                            if (token == null) {
                                                 withContext(Dispatchers.Main) {
-                                                    albums = albums.map { if (it.id == albumId) it.copy(name = newName) else it }
+                                                    Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
+                                                    isCreatingAlbum = false
+                                                    showCreateAlbumDialog = false
+                                                }
+                                                return@launch
+                                            }
+                                            val body = JSONObject().put("name", newAlbumName.trim())
+                                            val result = BackendClient.post("/albums", body, token = token)
+                                            withContext(Dispatchers.Main) {
+                                                isCreatingAlbum = false
+                                                if (result.isSuccess) {
+                                                    val newId = result.getOrNull()?.getInt("id")
+                                                    if (newId != null) {
+                                                        // Add to local list immediately so the name appears
+                                                        val newAlbum = AlbumUi(
+                                                            id = newId,
+                                                            name = newAlbumName.trim(),
+                                                            ownerId = AuthTokenStore.getUserId(),
+                                                            coverImageUrls = emptyList()
+                                                        )
+                                                        albums = albums + newAlbum
+                                                        selectedAlbumId = newId
+                                                        showCreateAlbumDialog = false
+                                                        // Refresh in background to get accurate data (cover images etc.)
+                                                        refreshHomeData()
+                                                    } else {
+                                                        Toast.makeText(context, "Failed to create album", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    val errorMsg = result.exceptionOrNull()?.message ?: "Failed to create album"
+                                                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
                                                 }
                                             }
+                                        }
+                                    },
+                                    enabled = newAlbumName.isNotBlank() && !isCreatingAlbum
+                                ) {
+                                    if (isCreatingAlbum) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                                    } else {
+                                        Text("Create")
                                     }
-                                    imageIdsToDelete.forEach { photoId ->
-                                        BackendClient.delete("/images/$photoId", token = t)
-                                    }
-                                    withContext(Dispatchers.Main) {
-                                        loadAlbumImages()
-                                        Toast.makeText(context, "Changes saved", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
                                 }
                             },
-                            onSharePhotos = { selectedPhotos ->
-                                scope.launch {
-                                    sharePhotos(context, selectedPhotos)
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showCreateAlbumDialog = false },
+                                    enabled = !isCreatingAlbum
+                                ) {
+                                    Text("Cancel")
                                 }
                             }
                         )
                     }
 
-                    else -> {
-                        HomeScreen(
-                            albums = albums,
-                            standalonePhotos = standalonePhotos,
-                            myPhotosAlbumId = myPhotosAlbumId,
-                            profilePictureUrl = currentUserProfilePictureUrl,
-                            onProfileClick = { profileLauncher.launch(Intent(context, ProfileActivity::class.java)) },
-                            onAlbumClick = {
-                                selectedAlbumId = it
-                                photoDetailFromStandalone = false
-                            },
-                            onStandalonePhotoClick = { photo ->
-                                val aid = myPhotosAlbumId
-                                if (aid != null) {
-                                    selectedAlbumId = aid
-                                    selectedPhotoId = photo.id
-                                    photos.clear()
-                                    photos.addAll(standalonePhotos)
-                                    photoDetailFromStandalone = true
-                                }
-                            },
-                            onAction = ::onHomeAction
-                        )
-                    }
-                }
-
-                if (showCameraBufferOverlay && cameraBuffer.isNotEmpty()) {
-                    ModalBottomSheet(
-                        onDismissRequest = {
-                            showCameraBufferOverlay = false
-                            cameraBuffer.clear()
-                        }
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                    if (showCameraBufferOverlay && cameraBuffer.isNotEmpty()) {
+                        ModalBottomSheet(
+                            onDismissRequest = {
+                                showCameraBufferOverlay = false
+                                cameraBuffer.clear()
+                            }
                         ) {
-                            Text(
-                                text = "${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"} captured",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Button(
-                                onClick = {
-                                    showCameraBufferOverlay = false
-                                    launchCamera(cameraTargetAlbumId)
-                                },
-                                modifier = Modifier.fillMaxWidth()
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(24.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("Take another")
+                                Text(
+                                    text = "${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"} captured",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Button(
+                                    onClick = {
+                                        showCameraBufferOverlay = false
+                                        launchCamera(cameraTargetAlbumId)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Take another")
+                                }
+                                Button(
+                                    onClick = {
+                                        val toUpload = cameraBuffer.toList()
+                                        cameraBuffer.clear()
+                                        showCameraBufferOverlay = false
+                                        pendingMultiplePhotos = toUpload
+                                        currentMultiPhotoIndex = 0
+                                        processNextPhoto(toUpload, 0, cameraTargetAlbumId)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Upload ${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"}")
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
                             }
-                            Button(
-                                onClick = {
-                                    val toUpload = cameraBuffer.toList()
-                                    cameraBuffer.clear()
-                                    showCameraBufferOverlay = false
-                                    pendingMultiplePhotos = toUpload
-                                    currentMultiPhotoIndex = 0
-                                    processNextPhoto(toUpload, 0, cameraTargetAlbumId)
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Upload ${cameraBuffer.size} photo${if (cameraBuffer.size == 1) "" else "s"}")
-                            }
-                            Spacer(modifier = Modifier.height(16.dp))
                         }
                     }
-                }
                 }
             }
         }
