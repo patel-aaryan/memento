@@ -1,11 +1,25 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
+from app.config.db import SessionLocal
 from app.config.firebase import initialize_firebase
 from app.routers import health, auth, albums, images, audio, upload, location, users, friends, notifications
+from app.services.notification_service import run_daily_anniversary_job
 
 settings = get_settings()
+
+
+async def _anniversary_scheduler_loop():
+    """Run the anniversary job every 24 hours."""
+    while True:
+        await asyncio.sleep(24 * 60 * 60)  # 24 hours
+        db = SessionLocal()
+        try:
+            await asyncio.to_thread(run_daily_anniversary_job, db)
+        finally:
+            db.close()
 
 
 @asynccontextmanager
@@ -13,8 +27,11 @@ async def lifespan(app: FastAPI):
     """Handle application lifespan events"""
     # Startup
     initialize_firebase()
+    scheduler_task = asyncio.create_task(_anniversary_scheduler_loop())
     yield
-    # Shutdown (if needed in the future)
+    # Shutdown
+    scheduler_task.cancel()
+    await scheduler_task
 
 
 app = FastAPI(
@@ -57,6 +74,7 @@ def custom_openapi():
             "/images",
             "/audio",
             "/upload",
+            "/notifications",
         ]
 
         for path, methods in openapi_schema["paths"].items():

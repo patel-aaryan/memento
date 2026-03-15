@@ -1,63 +1,119 @@
 package com.example.mementoandroid.api
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.mementoandroid.MainActivity
 import com.example.mementoandroid.R
+import com.example.mementoandroid.util.AuthTokenStore
+import com.google.android.gms.location.LocationServices
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 class FirebaseClient : FirebaseMessagingService() {
 
     companion object {
+        private const val TAG = "FCM"
         private const val CHANNEL_ID = "memento_notifications"
         private const val CHANNEL_NAME = "Memento Notifications"
     }
 
-    // Triggers when a new FCM token is generated (e.g., on first install)
-    override fun onNewToken(token: String) {
-        super.onNewToken(token)
-        Log.d("FCM", "========================================")
-        Log.d("FCM", "New device token generated: $token")
-        Log.d("FCM", "========================================")
-        // TODO: Make an HTTP POST request to your FastAPI backend to save this token
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onCreate() {
+        super.onCreate()
+        AuthTokenStore.init(applicationContext)
     }
 
-    // Triggers when a message is received while the app is in the FOREGROUND or BACKGROUND
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        Log.d(TAG, "New device token generated: $token")
+        AuthTokenStore.init(applicationContext)
+        val authToken = AuthTokenStore.get()
+        if (authToken != null) {
+            serviceScope.launch {
+                val body = org.json.JSONObject().put("fcm_token", token)
+                BackendClient.post("/notifications/register-device", body, authToken)
+                    .onSuccess { Log.d(TAG, "Device token registered with server") }
+                    .onFailure { Log.w(TAG, "Failed to register device token: $it") }
+            }
+        }
+    }
+
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d("FCM", "========================================")
-        Log.d("FCM", "Message received from: ${remoteMessage.from}")
-        
-        // Extract notification data
-        val title = remoteMessage.notification?.title ?: "Memento"
-        val body = remoteMessage.notification?.body ?: "New notification"
-        
-        Log.d("FCM", "Notification Title: $title")
-        Log.d("FCM", "Notification Body: $body")
-        
-        if (remoteMessage.data.isNotEmpty()) {
-            Log.d("FCM", "Message data payload: ${remoteMessage.data}")
-        }
-        Log.d("FCM", "========================================")
-        
-        // Display the notification
-        showNotification(title, body)
+        Log.d(TAG, "Message received from: ${remoteMessage.from}")
 
-        // Note: If the app is in the background, Android handles displaying
-        // the notification in the system tray automatically.
+        val messageType = remoteMessage.data["type"]
+
+        when (messageType) {
+            "anniversary_location_check" -> {
+                serviceScope.launch {
+                    handleAnniversaryLocationCheck()
+                }
+            }
+            else -> {
+                val title = remoteMessage.notification?.title ?: "Memento"
+                val body = remoteMessage.notification?.body ?: "New notification"
+                showNotification(title, body)
+            }
+        }
+    }
+
+    private suspend fun handleAnniversaryLocationCheck() {
+        withContext(Dispatchers.IO) {
+            AuthTokenStore.init(applicationContext)
+            val authToken = AuthTokenStore.get() ?: return@withContext
+            val location = getLastLocation() ?: return@withContext
+            val path = "/location/anniversary-check?lat=${location.latitude}&lng=${location.longitude}"
+            val result = BackendClient.get(path, authToken)
+            result.onSuccess { json ->
+                if (json.optBoolean("has_match", false)) {
+                    BackendClient.post("/notifications/send-anniversary-push", null, authToken)
+                        .onSuccess { Log.d(TAG, "Anniversary push triggered") }
+                        .onFailure { Log.w(TAG, "Failed to trigger anniversary push: $it") }
+                }
+            }.onFailure { Log.w(TAG, "Anniversary check failed: $it") }
+        }
+    }
+
+    private suspend fun getLastLocation(): android.location.Location? {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.w(TAG, "ACCESS_FINE_LOCATION not granted")
+            return null
+        }
+        val client = LocationServices.getFusedLocationProviderClient(this)
+        return suspendCancellableCoroutine { cont ->
+            client.lastLocation
+                .addOnSuccessListener { loc ->
+                    if (!cont.isCompleted) cont.resume(loc)
+                }
+                .addOnFailureListener {
+                    if (!cont.isCompleted) cont.resume(null)
+                }
+        }
     }
 
     private fun showNotification(title: String, body: String) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
-        // Create notification channel for Android 8.0+
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -69,8 +125,7 @@ class FirebaseClient : FirebaseMessagingService() {
             }
             notificationManager.createNotificationChannel(channel)
         }
-        
-        // Intent to open app when notification is tapped
+
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -80,8 +135,7 @@ class FirebaseClient : FirebaseMessagingService() {
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        
-        // Build the notification
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
@@ -90,9 +144,8 @@ class FirebaseClient : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
-        
-        // Show the notification
+
         notificationManager.notify(System.currentTimeMillis().toInt(), notification)
-        Log.d("FCM", "✓ Notification displayed successfully")
+        Log.d(TAG, "Notification displayed successfully")
     }
 }

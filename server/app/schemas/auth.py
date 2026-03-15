@@ -6,11 +6,13 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str
     name: str
+    fcm_token: Optional[str] = None
 
 
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    fcm_token: Optional[str] = None
 
 
 class Token(BaseModel):

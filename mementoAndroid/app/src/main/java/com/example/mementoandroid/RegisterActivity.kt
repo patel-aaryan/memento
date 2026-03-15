@@ -15,8 +15,11 @@ import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AuthTokenStore
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
+import kotlin.coroutines.resume
 
 class RegisterActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,10 +41,19 @@ class RegisterActivity : ComponentActivity() {
     }
 }
 
-private suspend fun loginToBackend(email: String, password: String): Result<String> {
+private suspend fun getFcmToken(): String? = suspendCancellableCoroutine { cont ->
+    FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+        if (!cont.isCompleted) {
+            cont.resume(if (task.isSuccessful) task.result else null)
+        }
+    }
+}
+
+private suspend fun loginToBackend(email: String, password: String, fcmToken: String? = null): Result<String> {
     val body = JSONObject().apply {
         put("email", email)
         put("password", password)
+        if (fcmToken != null) put("fcm_token", fcmToken)
     }
     return BackendClient.post(
         "/auth/login",
@@ -50,11 +62,12 @@ private suspend fun loginToBackend(email: String, password: String): Result<Stri
     ).map { it.getString("access_token") }
 }
 
-private suspend fun registerToBackend(name: String, email: String, password: String): Result<Unit> {
+private suspend fun registerToBackend(name: String, email: String, password: String, fcmToken: String? = null): Result<Unit> {
     val body = JSONObject().apply {
         put("name", name)
         put("email", email)
         put("password", password)
+        if (fcmToken != null) put("fcm_token", fcmToken)
     }
     return BackendClient.post(
         "/auth/register",
@@ -127,10 +140,11 @@ fun RegisterScreen(
                     errorMessage = null
                     isLoading = true
                     coroutineScope.launch {
-                        val registerResult = registerToBackend(name.trim(), email.trim(), password)
+                        val fcmToken = getFcmToken()
+                        val registerResult = registerToBackend(name.trim(), email.trim(), password, fcmToken)
                         registerResult
                             .onSuccess {
-                                val loginResult = loginToBackend(email.trim(), password)
+                                val loginResult = loginToBackend(email.trim(), password, fcmToken)
                                 isLoading = false
                                 loginResult
                                     .onSuccess { accessToken ->
