@@ -76,13 +76,11 @@ import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.sharePhotos
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
-import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
-import com.example.mementoandroid.reminder.AnniversaryLocationWorker
 
 private const val TAG = "MainActivity"
 
@@ -129,24 +127,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Get Firebase Cloud Messaging token
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val token = task.result
-                Log.d(TAG, "========================================")
-                Log.d(TAG, "FCM Device Token: $token")
-                Log.d(TAG, "========================================")
-                Toast.makeText(this, "FCM Token copied to logs", Toast.LENGTH_LONG).show()
-                // TODO: Send this token to your backend to store with user profile
-            } else {
-                Log.e(TAG, "Failed to get FCM token", task.exception)
-                Toast.makeText(this, "Failed to get FCM token", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         enableEdgeToEdge()
-        Log.d(TAG, "Scheduling first AnniversaryLocationWorker")
-        AnniversaryLocationWorker.scheduleNext(applicationContext)
         setContent {
             MementoAndroidTheme {
                 val context = LocalContext.current as ComponentActivity

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Security
 from sqlalchemy.orm import Session
 from app.config.db import get_db
 from app.schemas.auth import UserRegister, UserLogin, Token, UserResponse, UserUpdate
+from app.repositories import device_repository
 from app.repositories.user_repository import create_user, get_user_by_email
 from app.utils.auth import verify_password, create_access_token
 from app.dependencies.auth import get_current_user, security
@@ -29,6 +30,8 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create user"
             )
+        if user_data.fcm_token:
+            device_repository.upsert_device_token(db, new_user["id"], user_data.fcm_token)
         return new_user
     except Exception as e:
         raise HTTPException(
@@ -54,6 +57,9 @@ async def login(user_data: UserLogin, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
         )
+    
+    if user_data.fcm_token:
+        device_repository.upsert_device_token(db, user["id"], user_data.fcm_token)
     
     # Create access token
     access_token = create_access_token(data={"sub": str(user["id"])})

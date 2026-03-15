@@ -18,8 +18,11 @@ import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AuthTokenStore
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.json.JSONObject
+import kotlin.coroutines.resume
 
 class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,10 +49,19 @@ class LoginActivity : ComponentActivity() {
     }
 }
 
-private suspend fun loginToBackend(email: String, password: String): Result<String> {
+private suspend fun getFcmToken(): String? = suspendCancellableCoroutine { cont ->
+    FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+        if (!cont.isCompleted) {
+            cont.resume(if (task.isSuccessful) task.result else null)
+        }
+    }
+}
+
+private suspend fun loginToBackend(email: String, password: String, fcmToken: String? = null): Result<String> {
     val body = JSONObject().apply {
         put("email", email)
         put("password", password)
+        if (fcmToken != null) put("fcm_token", fcmToken)
     }
     return BackendClient.post(
         "/auth/login",
@@ -120,7 +132,8 @@ fun LoginScreen(
                     errorMessage = null
                     isLoading = true
                     coroutineScope.launch {
-                        val result = loginToBackend(email.trim(), password)
+                        val fcmToken = getFcmToken()
+                        val result = loginToBackend(email.trim(), password, fcmToken)
                         isLoading = false
                         result
                             .onSuccess { accessToken ->
