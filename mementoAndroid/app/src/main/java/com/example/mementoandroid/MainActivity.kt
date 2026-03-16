@@ -69,6 +69,7 @@ import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AlbumSortStore
 import com.example.mementoandroid.util.AlbumViewStore
 import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
 import com.example.mementoandroid.util.exifDateTimeToIso
@@ -94,6 +95,8 @@ private fun handle401(context: ComponentActivity, e: Throwable) {
 
 class MainActivity : ComponentActivity() {
 
+    private val darkModeState = mutableStateOf(false)
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
@@ -106,12 +109,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        darkModeState.value = DarkModeStore.get(applicationContext)
+    }
+
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         intent?.let { newIntent ->
             val albumId = newIntent.getIntExtra("album_id", -1).takeIf { it > 0 }
             if (albumId != null) {
-                // Update the intent so the composable can read it
                 setIntent(newIntent)
             }
         }
@@ -122,6 +129,7 @@ class MainActivity : ComponentActivity() {
         AuthTokenStore.init(applicationContext)
         AlbumSortStore.init(applicationContext)
         AlbumViewStore.init(applicationContext)
+        DarkModeStore.init(applicationContext)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             when {
@@ -140,7 +148,8 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            MementoAndroidTheme {
+            val darkMode by darkModeState
+            MementoAndroidTheme(darkTheme = darkMode) {
                 val context = LocalContext.current as ComponentActivity
                 val initialAlbumId = intent.getIntExtra("album_id", -1).takeIf { it > 0 }
                 var selectedAlbumId by rememberSaveable { mutableStateOf(initialAlbumId) }
@@ -153,6 +162,11 @@ class MainActivity : ComponentActivity() {
                 var standalonePhotos by remember { mutableStateOf<List<AlbumPhotoUi>>(emptyList()) }
                 var myPhotosAlbumId by remember { mutableStateOf<Int?>(null) }
                 var photoDetailFromStandalone by remember { mutableStateOf(false) }
+                var isRefreshingAlbumImages by remember { mutableStateOf(false) }
+                /** When set, open photo detail for this (albumId, photoId) without showing album first. Cleared when state is synced or on back. */
+                var pendingStandalonePhotoDetail by remember { mutableStateOf<Pair<Int, String>?>(null) }
+                /** After refresh from save/delete-audio, restore selection to this photo id. Cleared by LaunchedEffect once index is set. */
+                var photoIdToSelectAfterRefresh by remember { mutableStateOf<String?>(null) }
 
                 var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
                 var pendingCameraFile by remember { mutableStateOf<File?>(null) }
@@ -323,9 +337,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                fun loadAlbumImages() {
+                fun loadAlbumImages(onImagesLoaded: ((List<AlbumPhotoUi>) -> Unit)? = null) {
                     val aid = selectedAlbumId ?: return
                     val t = AuthTokenStore.get() ?: return
+                    isRefreshingAlbumImages = true
                     scope.launch {
                         BackendClient.getArray("/images/album/$aid", t)
                             .onSuccess { arr ->
@@ -348,9 +363,16 @@ class MainActivity : ComponentActivity() {
                                 withContext(Dispatchers.Main) {
                                     photos.clear()
                                     photos.addAll(list)
+                                    isRefreshingAlbumImages = false
+                                    onImagesLoaded?.invoke(list)
                                 }
                             }
-                            .onFailure { e -> withContext(Dispatchers.Main) { handle401(context, e) } }
+                            .onFailure { e ->
+                                withContext(Dispatchers.Main) {
+                                    isRefreshingAlbumImages = false
+                                    handle401(context, e)
+                                }
+                            }
                     }
                 }
 
@@ -877,12 +899,150 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        pendingStandalonePhotoDetail != null -> {
+                            val (aid, photoId) = pendingStandalonePhotoDetail!!
+                            val list = standalonePhotos
+                            val displayIdx = currentPhotoIndex.coerceIn(0, (list.size - 1).coerceAtLeast(0))
+                            val photoToShow = list.getOrNull(displayIdx) ?: list.find { it.id == photoId }
+                            if (photoToShow != null) {
+                                LaunchedEffect(Unit) {
+                                    selectedAlbumId = aid
+                                    selectedPhotoId = list.getOrNull(displayIdx)?.id ?: photoId
+                                    photos.clear()
+                                    photos.addAll(list)
+                                    photoDetailFromStandalone = true
+                                    pendingStandalonePhotoDetail = null
+                                }
+                                val albumName = albums.find { it.id == aid }?.name ?: ""
+                                val albumOwnerId = albums.find { it.id == aid }?.ownerId
+                                val currentUserId = AuthTokenStore.getUserId()
+                                val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
+                                    (photoToShow.userId != null && currentUserId != null && currentUserId == photoToShow.userId)
+                                PhotoDetailScreen(
+                                    photo = photoToShow,
+                                    albumName = albumName,
+                                    mock = getPhotoDetailMock(albumName, photoToShow.id),
+                                    onBack = {
+                                        pendingStandalonePhotoDetail = null
+                                        selectedAlbumId = null
+                                        selectedPhotoId = null
+                                        photoDetailFromStandalone = false
+                                    },
+                                    canDeletePhoto = canDeletePhoto,
+                                    allPhotos = if (list.size > 1) list else null,
+                                    currentPhotoIndex = displayIdx,
+                                    onPhotoIndexChange = { newIdx ->
+                                        currentPhotoIndex = newIdx.coerceIn(0, list.size - 1)
+                                        selectedPhotoId = list.getOrNull(newIdx)?.id
+                                    },
+                                    onDeleteAudio = {
+                                        scope.launch {
+                                            val t = AuthTokenStore.get() ?: return@launch
+                                            val body = JSONObject().put("audio_url", JSONObject.NULL)
+                                            val result = BackendClient.put("/images/${photoToShow.id}", body, token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { handle401(context, it) }
+                                                if (result.isSuccess) {
+                                                    photoIdToSelectAfterRefresh = photoToShow.id
+                                                    loadAlbumImages()
+                                                    selectedAlbumId = aid
+                                                    selectedPhotoId = photoToShow.id
+                                                    photos.clear()
+                                                    photos.addAll(standalonePhotos)
+                                                    currentPhotoIndex = list.indexOfFirst { it.id == photoToShow.id }.coerceAtLeast(0)
+                                                    photoDetailFromStandalone = true
+                                                    pendingStandalonePhotoDetail = null
+                                                }
+                                                Toast.makeText(context, if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
+                                        scope.launch {
+                                            val t = AuthTokenStore.get() ?: return@launch
+                                            var audioUrl: String? = null
+                                            if (!audioFilePath.isNullOrBlank()) {
+                                                val file = java.io.File(audioFilePath)
+                                                if (file.exists()) audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
+                                            }
+                                            val body = JSONObject().apply {
+                                                put("caption", caption)
+                                                takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
+                                                latitude?.let { put("latitude", it) }
+                                                longitude?.let { put("longitude", it) }
+                                                audioUrl?.let { put("audio_url", it) }
+                                            }
+                                            val result = BackendClient.put("/images/${photoToShow.id}", body, token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { handle401(context, it) }
+                                                if (result.isSuccess) {
+                                                    photoIdToSelectAfterRefresh = photoToShow.id
+                                                    loadAlbumImages()
+                                                    selectedAlbumId = aid
+                                                    selectedPhotoId = photoToShow.id
+                                                    photos.clear()
+                                                    photos.addAll(standalonePhotos)
+                                                    currentPhotoIndex = list.indexOfFirst { it.id == photoToShow.id }.coerceAtLeast(0)
+                                                    photoDetailFromStandalone = true
+                                                    pendingStandalonePhotoDetail = null
+                                                }
+                                                Toast.makeText(context, if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    onDeletePhoto = {
+                                        scope.launch {
+                                            val t = AuthTokenStore.get()
+                                            withContext(Dispatchers.Main) {
+                                                if (t == null) {
+                                                    Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
+                                                    return@withContext
+                                                }
+                                            }
+                                            val result = BackendClient.delete("/images/${photoToShow.id}", token = t)
+                                            withContext(Dispatchers.Main) {
+                                                result.onFailure { e ->
+                                                    handle401(context, e)
+                                                    Toast.makeText(context, (e as? BackendException)?.message ?: "Failed to delete", Toast.LENGTH_SHORT).show()
+                                                }
+                                                if (result.isSuccess) {
+                                                    val newList = list.filter { it.id != photoToShow.id }
+                                                    photos.clear()
+                                                    photos.addAll(newList)
+                                                    standalonePhotos = newList
+                                                    pendingStandalonePhotoDetail = null
+                                                    selectedAlbumId = null
+                                                    selectedPhotoId = null
+                                                    photoDetailFromStandalone = false
+                                                    Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                            } else {
+                                pendingStandalonePhotoDetail = null
+                            }
+                        }
+
                         selectedAlbumId != null && selectedPhotoId != null -> {
                             val filteredAlbumPhotos = photos.sortedAndFiltered(albumSort)
-                            LaunchedEffect(selectedPhotoId, filteredAlbumPhotos) {
-                                selectedPhotoId?.let { id ->
+                            LaunchedEffect(photoIdToSelectAfterRefresh, filteredAlbumPhotos) {
+                                photoIdToSelectAfterRefresh?.let { id ->
                                     val idx = filteredAlbumPhotos.indexOfFirst { it.id == id }
-                                    if (idx >= 0) currentPhotoIndex = idx
+                                    if (idx >= 0) {
+                                        currentPhotoIndex = idx
+                                        selectedPhotoId = id
+                                    }
+                                    photoIdToSelectAfterRefresh = null
+                                }
+                            }
+                            LaunchedEffect(selectedPhotoId, filteredAlbumPhotos) {
+                                if (photoIdToSelectAfterRefresh == null) {
+                                    selectedPhotoId?.let { id ->
+                                        val idx = filteredAlbumPhotos.indexOfFirst { it.id == id }
+                                        if (idx >= 0) currentPhotoIndex = idx
+                                    }
                                 }
                             }
                             BackHandler {
@@ -896,7 +1056,8 @@ class MainActivity : ComponentActivity() {
                             }
                             val albumName = selectedAlbumName ?: ""
                             val photo = filteredAlbumPhotos.getOrNull(currentPhotoIndex) ?: filteredAlbumPhotos.find { it.id == selectedPhotoId }
-                            if (photo != null) {
+                            if (photo != null || isRefreshingAlbumImages) {
+                                if (photo != null) {
                                 val photoToDelete = photo
                                 val albumOwnerId = selectedAlbumId?.let { aid -> albums.find { it.id == aid }?.ownerId }
                                 val currentUserId = AuthTokenStore.getUserId()
@@ -926,7 +1087,10 @@ class MainActivity : ComponentActivity() {
                                             val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
                                             withContext(Dispatchers.Main) {
                                                 result.onFailure { handle401(context, it) }
-                                                if (result.isSuccess) loadAlbumImages()
+                                                if (result.isSuccess) {
+                                                    photoIdToSelectAfterRefresh = selectedPhotoId
+                                                    loadAlbumImages()
+                                                }
                                                 Toast.makeText(
                                                     context,
                                                     if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
@@ -955,7 +1119,10 @@ class MainActivity : ComponentActivity() {
                                             val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
                                             withContext(Dispatchers.Main) {
                                                 result.onFailure { handle401(context, it) }
-                                                if (result.isSuccess) loadAlbumImages()
+                                                if (result.isSuccess) {
+                                                    photoIdToSelectAfterRefresh = selectedPhotoId
+                                                    loadAlbumImages()
+                                                }
                                                 Toast.makeText(
                                                     context,
                                                     if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
@@ -996,6 +1163,9 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 )
+                                } else {
+                                    if (!isRefreshingAlbumImages) selectedPhotoId = null
+                                }
                             } else {
                                 selectedPhotoId = null
                             }
@@ -1133,11 +1303,8 @@ class MainActivity : ComponentActivity() {
                                 onStandalonePhotoClick = { photo ->
                                     val aid = myPhotosAlbumId
                                     if (aid != null) {
-                                        selectedAlbumId = aid
-                                        selectedPhotoId = photo.id
-                                        photos.clear()
-                                        photos.addAll(standalonePhotos)
-                                        photoDetailFromStandalone = true
+                                        currentPhotoIndex = standalonePhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
+                                        pendingStandalonePhotoDetail = Pair(aid, photo.id)
                                     }
                                 },
                                 onAction = ::onHomeAction

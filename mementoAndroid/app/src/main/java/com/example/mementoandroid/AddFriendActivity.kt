@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.api.BackendException
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
+import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.PendingFriendTokenStore
 import kotlinx.coroutines.Dispatchers
@@ -38,9 +39,10 @@ class AddFriendActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        DarkModeStore.init(applicationContext)
         enableEdgeToEdge()
         setContent {
-            MementoAndroidTheme {
+            MementoAndroidTheme(darkTheme = DarkModeStore.get(applicationContext)) {
                 var status by remember { mutableStateOf<AddFriendStatus>(AddFriendStatus.Loading) }
                 val token = intent?.data?.getQueryParameter("token")
 

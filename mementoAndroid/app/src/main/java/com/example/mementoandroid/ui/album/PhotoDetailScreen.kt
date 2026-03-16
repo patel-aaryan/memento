@@ -84,6 +84,8 @@ import com.example.mementoandroid.util.formatDateMillis
 import com.example.mementoandroid.util.formatPhotoMetadataDateTime
 import com.example.mementoandroid.util.formatPhotoMetadataLocation
 import com.example.mementoandroid.util.formatTime
+import com.example.mementoandroid.util.datePickerMillisToLocalMidnight
+import com.example.mementoandroid.util.instantToLocalDateMillis
 import com.example.mementoandroid.util.parseIsoToHourMinute
 import com.example.mementoandroid.util.parseIsoToMillis
 import com.example.mementoandroid.util.recordAudioToCache
@@ -94,7 +96,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
 import android.util.Log
 import com.example.mementoandroid.api.BackendClient
 import java.net.URLEncoder
@@ -126,6 +131,8 @@ fun PhotoDetailScreen(
     var notesText by remember(photo.id) { mutableStateOf(photo.caption?.takeIf { it.isNotBlank() } ?: mock.caption) }
     var displayedDateTime by remember(photo.id) { mutableStateOf(mock.dateTime) }
     var displayedLocation by remember(photo.id) { mutableStateOf(mock.location) }
+    var metadataReady by remember(photo.id) { mutableStateOf(false) }
+    var imageAspectRatio by remember(photo.id) { mutableStateOf(1f) }
     var isEditMode by remember(photo.id) { mutableStateOf(false) }
     var editedTakenAt by remember(photo.id) { mutableStateOf(photo.takenAt ?: "") }
     // Location search text; autocomplete suggestions and selected lat/lng for save
@@ -228,12 +235,13 @@ fun PhotoDetailScreen(
             formatBackendDateTime(photo.takenAt)?.let { displayedDateTime = it }
                 ?: formatBackendDateTime(photo.dateAdded)?.let { displayedDateTime = it }
         }
+        metadataReady = true
     }
 
     LaunchedEffect(isEditMode) {
         if (isEditMode) {
-            val millis = parseIsoToMillis(photo.takenAt)
-            pendingDateMillis = millis ?: System.currentTimeMillis()
+            val instant = parseIsoToMillis(photo.takenAt) ?: System.currentTimeMillis()
+            pendingDateMillis = instantToLocalDateMillis(instant)
             val hm = parseIsoToHourMinute(photo.takenAt)
             if (hm != null) {
                 pendingHour = hm.first
@@ -347,16 +355,16 @@ fun PhotoDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    top = 84.dp,
+                    top = 56.dp,
                     start = paddingValues.calculateStartPadding(layoutDirection),
                     end = paddingValues.calculateEndPadding(layoutDirection),
                     bottom = paddingValues.calculateBottomPadding()
                 )
                 .verticalScroll(rememberScrollState())
         ) {
-//            Spacer(modifier = Modifier.height(32.dp))
-            // Up arrow: above photo (when multiple photos)
-            if (allPhotos != null && allPhotos.size > 1) {
+              Spacer(modifier = Modifier.height(20.dp))
+            // Up arrow: above photo (when multiple photos; hidden in edit mode)
+            if (!isEditMode && allPhotos != null && allPhotos.size > 1) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center
@@ -377,22 +385,22 @@ fun PhotoDetailScreen(
                 }
             }
 
-            // Main image — full width; swipe up/down for next/prev when multiple photos; arrows at top/bottom center
+            // Main image — full width; keep original aspect ratio (no crop); swipe up/down for next/prev when multiple photos (disabled in edit mode)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(320.dp)
                     .then(
-                        if (allPhotos != null && allPhotos.size > 1) {
-                            Modifier.pointerInput(allPhotos.size, currentPhotoIndex) {
+                        if (!isEditMode && allPhotos != null && allPhotos.size > 1) {
+                            Modifier.pointerInput(isEditMode, allPhotos.size, currentPhotoIndex) {
                                 var totalDrag = 0f
                                 detectVerticalDragGestures { _, dragAmount ->
                                     totalDrag += dragAmount
-                                    if (totalDrag > 120f) {
+                                    // Swipe up (negative drag) → next photo; swipe down (positive drag) → previous photo
+                                    if (totalDrag < -120f) {
                                         totalDrag = 0f
                                         val next = (currentPhotoIndex + 1).coerceAtMost(allPhotos.size - 1)
                                         if (next != currentPhotoIndex) onPhotoIndexChange(next)
-                                    } else if (totalDrag < -120f) {
+                                    } else if (totalDrag > 120f) {
                                         totalDrag = 0f
                                         val prev = (currentPhotoIndex - 1).coerceAtLeast(0)
                                         if (prev != currentPhotoIndex) onPhotoIndexChange(prev)
@@ -403,30 +411,66 @@ fun PhotoDetailScreen(
                     )
             ) {
                 when {
-                    photo.imageUrl != null -> AsyncImage(
-                        model = photo.imageUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp)
-                    )
-                    photo.uri != null -> AsyncImage(
-                        model = photo.uri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp)
-                    )
-                    else -> Image(
-                        painter = painterResource(id = photo.imageRes!!),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp)
-                    )
+                    photo.imageUrl != null -> {
+                        val imageModel = remember(photo.id, photo.imageUrl) {
+                            ImageRequest.Builder(context).data(photo.imageUrl).listener(
+                                onSuccess = { _, result ->
+                                    if (result is SuccessResult) {
+                                        val w = result.drawable.intrinsicWidth
+                                        val h = result.drawable.intrinsicHeight
+                                        if (w > 0 && h > 0) imageAspectRatio = w.toFloat() / h
+                                    }
+                                }
+                            ).build()
+                        }
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(imageAspectRatio)
+                        )
+                    }
+                    photo.uri != null -> {
+                        val imageModel = remember(photo.id, photo.uri) {
+                            ImageRequest.Builder(context).data(photo.uri).listener(
+                                onSuccess = { _, result ->
+                                    if (result is SuccessResult) {
+                                        val w = result.drawable.intrinsicWidth
+                                        val h = result.drawable.intrinsicHeight
+                                        if (w > 0 && h > 0) imageAspectRatio = w.toFloat() / h
+                                    }
+                                }
+                            ).build()
+                        }
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(imageAspectRatio)
+                        )
+                    }
+                    else -> {
+                        LaunchedEffect(photo.id, photo.imageRes) {
+                            photo.imageRes?.let { resId ->
+                                val d = context.getDrawable(resId)
+                                if (d != null && d.intrinsicWidth > 0 && d.intrinsicHeight > 0) {
+                                    imageAspectRatio = d.intrinsicWidth.toFloat() / d.intrinsicHeight
+                                }
+                            }
+                        }
+                        Image(
+                            painter = painterResource(id = photo.imageRes!!),
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(imageAspectRatio)
+                        )
+                    }
                 }
             }
 
@@ -439,7 +483,9 @@ fun PhotoDetailScreen(
                     onDismissRequest = { showDatePickerDialog = false },
                     confirmButton = {
                         TextButton(onClick = {
-                            datePickerState.selectedDateMillis?.let { pendingDateMillis = it }
+                            datePickerState.selectedDateMillis?.let {
+                                pendingDateMillis = datePickerMillisToLocalMidnight(it)
+                            }
                             showDatePickerDialog = false
                         }) {
                             Text("OK")
@@ -682,26 +728,64 @@ fun PhotoDetailScreen(
                         }
                     }
                 } else {
-                    // View mode: simple rows (no cards), same as before
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = displayedDateTime,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    // View mode: simple rows (no cards); show placeholders until metadata is ready to avoid flashing previous photo's info
+                    if (metadataReady) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = displayedDateTime,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
 
-                    if (displayedLocation != null) {
+                        if (displayedLocation != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = displayedLocation!!,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    } else {
+                        // Placeholder blocks so layout doesn't jump; same approximate height as one row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                            Text(
+                                text = "…",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -711,19 +795,19 @@ fun PhotoDetailScreen(
                                 Icons.Default.LocationOn,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                             )
                             Text(
-                                text = displayedLocation!!,
+                                text = "…",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
                         }
                     }
                 }
 
-                // Uploader (group albums only) — between location and audio
-                if (mock.uploaderName != null) {
+                // Uploader (group albums only) — between location and audio; hide until metadata ready
+                if (metadataReady && mock.uploaderName != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -875,7 +959,15 @@ fun PhotoDetailScreen(
                                 modifier = Modifier.size(32.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
-                            Column(modifier = Modifier.weight(1f)) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .then(
+                                        // Single-line "Tap to play" / "Playing…": match icon height so text is vertically centered
+                                        if (hasRecording && !isEditMode) Modifier.height(32.dp) else Modifier
+                                    ),
+                                verticalArrangement = if (hasRecording && !isEditMode) Arrangement.Center else Arrangement.spacedBy(0.dp)
+                            ) {
                                 Text(
                                     text = when {
                                         isRecording -> "Recording…"
@@ -885,17 +977,17 @@ fun PhotoDetailScreen(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                                Text(
-                                    text = when {
-                                        isRecording -> "Tap to stop"
-                                        hasRecording -> ""
-                                        else -> "Record an audio for this Memento"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                if (!hasRecording) {
+                                    Text(
+                                        text = when {
+                                            isRecording -> "Tap to stop"
+                                            else -> "Record an audio for this Memento"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                                 if (isEditMode && hasRecording) {
-                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = "Delete voice note",
                                         style = MaterialTheme.typography.bodySmall,
@@ -949,8 +1041,8 @@ fun PhotoDetailScreen(
                         Text("Save changes")
                     }
                 } else {
-                    // View mode: only show caption area when there is content (skip blank or "null")
-                    if (notesText.isNotBlank() && notesText != "null") {
+                    // View mode: only show caption area when there is content (skip blank or "null"); hide until metadata ready
+                    if (metadataReady && notesText.isNotBlank() && notesText != "null") {
                         Text(
                             text = "Notes",
                             style = MaterialTheme.typography.labelMedium,
@@ -965,8 +1057,8 @@ fun PhotoDetailScreen(
                 }
             }
 
-            // Down arrow: below photo/details (when multiple photos)
-            if (allPhotos != null && allPhotos.size > 1) {
+            // Down arrow: below photo/details (when multiple photos; hidden in edit mode)
+            if (!isEditMode && allPhotos != null && allPhotos.size > 1) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center

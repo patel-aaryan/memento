@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
+import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.AuthTokenStore
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.launch
@@ -25,8 +26,9 @@ class RegisterActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        DarkModeStore.init(applicationContext)
         setContent {
-            MementoAndroidTheme {
+            MementoAndroidTheme(darkTheme = DarkModeStore.get(applicationContext)) {
                 RegisterScreen(
                     onRegisterSuccess = {
                         startActivity(Intent(this, MainActivity::class.java))

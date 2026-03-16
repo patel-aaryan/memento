@@ -160,11 +160,12 @@ def get_album_images(db: Session, album_id: int) -> List[dict]:
 
 
 def get_album_cover_urls(db: Session, album_id: int, limit: int = 4) -> List[str]:
-    """Get first N image URLs for an album (for cover/thumbnail)."""
+    """Get up to N image URLs for an album (for cover/thumbnail). Uses oldest-first so when
+    there are fewer than 4 photos, the single cover shown is the oldest uploaded."""
     query = text("""
         SELECT image_url FROM images
         WHERE album_id = :album_id
-        ORDER BY date_added DESC
+        ORDER BY date_added ASC
         LIMIT :limit
     """)
     result = db.execute(query, {"album_id": album_id, "limit": limit})

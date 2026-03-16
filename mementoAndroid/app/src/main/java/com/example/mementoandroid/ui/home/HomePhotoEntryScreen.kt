@@ -63,6 +63,8 @@ import com.example.mementoandroid.util.formatBackendDateTime
 import com.example.mementoandroid.util.formatDateMillis
 import com.example.mementoandroid.util.formatPhotoMetadataLocation
 import com.example.mementoandroid.util.formatTime
+import com.example.mementoandroid.util.datePickerMillisToLocalMidnight
+import com.example.mementoandroid.util.instantToLocalDateMillis
 import com.example.mementoandroid.util.parseIsoToHourMinute
 import com.example.mementoandroid.util.parseIsoToMillis
 import com.example.mementoandroid.util.recordAudioToCache
@@ -214,8 +216,8 @@ fun HomePhotoEntryScreen(
     LaunchedEffect(isEditingTimestamp) {
         if (isEditingTimestamp) {
             val source = editedTakenAt.takeIf { it.isNotBlank() } ?: metadata.takenAt
-            val millis = parseIsoToMillis(source) ?: System.currentTimeMillis()
-            pendingDateMillis = millis
+            val instant = parseIsoToMillis(source) ?: System.currentTimeMillis()
+            pendingDateMillis = instantToLocalDateMillis(instant)
             val hm = parseIsoToHourMinute(source)
             if (hm != null) {
                 pendingHour = hm.first
@@ -359,7 +361,9 @@ fun HomePhotoEntryScreen(
                 onDismissRequest = { showDatePickerDialog = false },
                 confirmButton = {
                     TextButton(onClick = {
-                        datePickerState.selectedDateMillis?.let { pendingDateMillis = it }
+                        datePickerState.selectedDateMillis?.let {
+                            pendingDateMillis = datePickerMillisToLocalMidnight(it)
+                        }
                         showDatePickerDialog = false
                     }) {
                         Text("OK")

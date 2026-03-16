@@ -1,5 +1,6 @@
 package com.example.mementoandroid.ui.theme
 
+import androidx.compose.ui.graphics.Color
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -14,7 +15,10 @@ import androidx.compose.ui.platform.LocalContext
 private val DarkColorScheme = darkColorScheme(
     primary = Purple80,
     secondary = PurpleGrey80,
-    tertiary = Pink80
+    tertiary = Pink80,
+    onSurface = Color(0xFFE6E1E5),
+    onSurfaceVariant = Color(0xFFCAC4D0),
+    onBackground = Color(0xFFE6E1E5)
 )
 
 private val LightColorScheme = lightColorScheme(

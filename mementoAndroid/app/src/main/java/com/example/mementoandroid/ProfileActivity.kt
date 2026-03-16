@@ -45,6 +45,7 @@ import com.example.mementoandroid.api.getFcmToken
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.components.AddPhotoBottomSheet
 import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.orDefaultAvatar
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
@@ -74,8 +75,10 @@ class ProfileActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
+        DarkModeStore.init(applicationContext)
         setContent {
-            MementoAndroidTheme {
+            var darkMode by remember { mutableStateOf(DarkModeStore.get(applicationContext)) }
+            MementoAndroidTheme(darkTheme = darkMode) {
                 val context = LocalContext.current as ComponentActivity
                 val token = AuthTokenStore.get()
                 var user by remember { mutableStateOf<UserProfile?>(null) }
@@ -315,6 +318,8 @@ class ProfileActivity : ComponentActivity() {
                 ProfileScreen(
                     user = user,
                     friends = friends,
+                    darkModeEnabled = darkMode,
+                    onDarkModeChange = { darkMode = it; DarkModeStore.set(applicationContext, it) },
                     onBack = { finish() },
                     onProfilePictureClick = { addPhotoSheetOpen = true },
                     onSaveName = ::saveName,
@@ -332,6 +337,8 @@ class ProfileActivity : ComponentActivity() {
 fun ProfileScreen(
     user: UserProfile?,
     friends: List<UserProfile> = emptyList(),
+    darkModeEnabled: Boolean = false,
+    onDarkModeChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     onProfilePictureClick: () -> Unit,
     onSaveName: ((String) -> Unit)? = null,
@@ -345,7 +352,6 @@ fun ProfileScreen(
     val profilePictureUrl = user?.profilePictureUrl
     var showNameDialog by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
-    var darkModeEnabled by remember { mutableStateOf(false) }
     var friendEmail by remember { mutableStateOf("") }
 
     Scaffold(
@@ -445,7 +451,7 @@ fun ProfileScreen(
                     Text(text = "Dark Mode", fontSize = 16.sp)
                     Switch(
                         checked = darkModeEnabled,
-                        onCheckedChange = { darkModeEnabled = it }
+                        onCheckedChange = onDarkModeChange
                     )
                 }
             }

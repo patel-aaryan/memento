@@ -32,6 +32,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -62,6 +64,7 @@ import com.example.mementoandroid.util.formatPhotoMetadataLocation
 import com.example.mementoandroid.ui.home.components.SortAndFilterRow
 import com.example.mementoandroid.ui.home.components.HomeSort
 import com.example.mementoandroid.ui.home.components.HomeSortKind
+import com.example.mementoandroid.ui.home.components.HomeFilterKind
 
 /** Home list item: either a standalone photo (click opens photo detail) or an album (click opens album). */
 sealed class HomeItem {
@@ -96,6 +99,7 @@ fun HomeScreen(
     val initialGridView = remember { AlbumViewStore.getIsGridView() }
     var showTileView by remember(initialGridView) { mutableStateOf(initialGridView) }
     var homeSort by remember { mutableStateOf(HomeSort(HomeSortKind.NEWEST_FIRST)) }
+    var homeFilter by remember { mutableStateOf(HomeFilterKind.ALL) }
 
     LaunchedEffect(showTileView) {
         AlbumViewStore.saveIsGridView(showTileView)
@@ -107,15 +111,17 @@ fun HomeScreen(
     val albumsWithoutMyPhotos = remember(albums, myPhotosAlbumId) {
         if (myPhotosAlbumId == null) albums else albums.filter { it.id != myPhotosAlbumId }
     }
-    val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos, homeSort) {
+    val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos, homeSort, homeFilter) {
         val aid = myPhotosAlbumId ?: 0
-        // Sort standalone photos
         val sortedPhotos = standalonePhotos.sortedPhotosForHome(homeSort)
-
-        // Sort albums
         val sortedAlbums = albumsWithoutMyPhotos.sortedAlbumsForHome(homeSort)
-
-        sortedPhotos.map { HomeItem.StandalonePhoto(it, aid) } + sortedAlbums.map { HomeItem.Album(it) }
+        val photos = sortedPhotos.map { HomeItem.StandalonePhoto(it, aid) }
+        val albumItems = sortedAlbums.map { HomeItem.Album(it) }
+        when (homeFilter) {
+            HomeFilterKind.ALL -> photos + albumItems
+            HomeFilterKind.MY_PHOTOS -> photos
+            HomeFilterKind.SHARED_ALBUMS -> albumItems
+        }
     }
 
     val filteredItems = remember(searchQuery, homeItems) {
@@ -123,7 +129,11 @@ fun HomeScreen(
         else homeItems.filter { it.displayTitle().contains(searchQuery, ignoreCase = true) }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         // Main content
         Column(
             modifier = Modifier
@@ -134,7 +144,7 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -188,7 +198,9 @@ fun HomeScreen(
             SortAndFilterRow(
                 sort = homeSort,
                 onSortChange = { homeSort = it },
-                modifier = Modifier.padding(horizontal = 16.dp)
+                filter = homeFilter,
+                onFilterChange = { homeFilter = it },
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 2.dp)
             )
 
             if (showTileView) {
@@ -228,12 +240,16 @@ fun HomeScreen(
                         when (item) {
                             is HomeItem.StandalonePhoto -> ListItem(
                                 modifier = Modifier.clickable { onStandalonePhotoClick(item.photo) },
+                                colors = ListItemDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                ),
                                 leadingContent = {
                                     StandalonePhotoThumbnail(photo = item.photo, size = 32.dp)
                                 },
                                 headlineContent = {
                                     Text(
                                         item.displayTitle(),
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
@@ -241,6 +257,9 @@ fun HomeScreen(
                             )
                             is HomeItem.Album -> ListItem(
                                 modifier = Modifier.clickable { onAlbumClick(item.album.id) },
+                                colors = ListItemDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                ),
                                 leadingContent = {
                                     AlbumLogo(
                                         album = item.album,
@@ -248,7 +267,10 @@ fun HomeScreen(
                                     )
                                 },
                                 headlineContent = {
-                                    Text(item.album.name)
+                                    Text(
+                                        item.album.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
                                 },
                             )
                         }
@@ -287,6 +309,7 @@ fun HomeScreen(
                     Text(
                         text = "Add",
                         style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
 
@@ -355,6 +378,7 @@ private fun StandalonePhotoTile(
         Text(
             text = title,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
@@ -405,6 +429,7 @@ private fun AlbumTile(
         Text(
             text = album.name,
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
