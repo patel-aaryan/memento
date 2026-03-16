@@ -20,7 +20,7 @@ def create_image(
         VALUES (:album_id, :caption, :image_url, :audio_url, :latitude, :longitude, :user_id, CAST(:taken_at AS TIMESTAMPTZ))
         RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
     """)
-    
+
     try:
         result = db.execute(query, {
             "album_id": album_id,
@@ -34,7 +34,7 @@ def create_image(
         })
         db.commit()
         row = result.fetchone()
-        
+
         if row:
             return _row_to_image_dict(row)
         return None
@@ -68,16 +68,17 @@ def get_image_by_id(db: Session, image_id: int) -> Optional[dict]:
         FROM images
         WHERE id = :image_id
     """)
-    
+
     result = db.execute(query, {"image_id": image_id})
     row = result.fetchone()
-    
+
     if row:
         return _row_to_image_dict(row)
     return None
 
 
-_UPDATEABLE_IMAGE_KEYS = ("caption", "image_url", "audio_url", "latitude", "longitude", "taken_at")
+_UPDATEABLE_IMAGE_KEYS = ("caption", "image_url",
+                          "audio_url", "latitude", "longitude", "taken_at")
 
 
 def update_image(
@@ -114,11 +115,13 @@ def update_image(
     """)
 
     try:
-        print(f"[image_repository] UPDATE images SET {', '.join(set_clauses)} WHERE id=:image_id params={params}", flush=True)
+        print(
+            f"[image_repository] UPDATE images SET {', '.join(set_clauses)} WHERE id=:image_id params={params}", flush=True)
         result = db.execute(query, params)
         row = result.fetchone()
         db.commit()
-        print(f"[image_repository] UPDATE rowcount={result.rowcount} returned_caption={row[2] if row else None!r}", flush=True)
+        print(
+            f"[image_repository] UPDATE rowcount={result.rowcount} returned_caption={row[2] if row else None!r}", flush=True)
         if row:
             return _row_to_image_dict(row)
         return None
@@ -133,7 +136,7 @@ def delete_image(db: Session, image_id: int) -> bool:
         DELETE FROM images
         WHERE id = :image_id
     """)
-    
+
     try:
         result = db.execute(query, {"image_id": image_id})
         db.commit()
@@ -151,7 +154,7 @@ def get_album_images(db: Session, album_id: int) -> List[dict]:
         WHERE album_id = :album_id
         ORDER BY date_added DESC
     """)
-    
+
     result = db.execute(query, {"album_id": album_id})
     return [_row_to_image_dict(row) for row in result]
 
@@ -195,4 +198,3 @@ def get_user_images_with_location_on_date(
         },
     )
     return [_row_to_image_dict(row) for row in result]
-

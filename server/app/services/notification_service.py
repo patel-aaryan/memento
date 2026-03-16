@@ -1,8 +1,11 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from firebase_admin import messaging
+
+from app.config.settings import get_settings
 from sqlalchemy.orm import Session
 
 from app.repositories import device_repository, image_repository
@@ -45,7 +48,8 @@ def send_push_to_user(
             if not response.success and response.exception:
                 if isinstance(response.exception, messaging.UnregisteredError):
                     device_repository.remove_device_token(db, tokens[i])
-                    logger.info("Removed stale FCM token for user_id=%s", user_id)
+                    logger.info(
+                        "Removed stale FCM token for user_id=%s", user_id)
                 else:
                     logger.warning(
                         "FCM send failed for user_id=%s: %s",
@@ -78,7 +82,8 @@ def send_data_message_to_user(db: Session, user_id: int, data: dict) -> None:
             if not response.success and response.exception:
                 if isinstance(response.exception, messaging.UnregisteredError):
                     device_repository.remove_device_token(db, tokens[i])
-                    logger.info("Removed stale FCM token for user_id=%s", user_id)
+                    logger.info(
+                        "Removed stale FCM token for user_id=%s", user_id)
                 else:
                     logger.warning(
                         "FCM data message failed for user_id=%s: %s",
@@ -96,8 +101,10 @@ def run_daily_anniversary_job(db: Session) -> None:
     """
     Scheduled job: find users with geotagged photos from exactly 1 year ago,
     send a silent data message to trigger their devices to run the location check.
+    Uses anniversary_timezone for "today" so dates match user expectations.
     """
-    today = date.today()
+    tz = ZoneInfo(get_settings().anniversary_timezone)
+    today = datetime.now(tz).date()
     try:
         target_date = today.replace(year=today.year - 1)
     except ValueError:
@@ -105,7 +112,6 @@ def run_daily_anniversary_job(db: Session) -> None:
 
     target_date_str = target_date.isoformat()
     user_ids = device_repository.get_all_users_with_devices(db)
-
     for user_id in user_ids:
         images = image_repository.get_user_images_with_location_on_date(
             db=db,

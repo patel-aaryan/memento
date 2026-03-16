@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,18 +9,22 @@ from app.config.firebase import initialize_firebase
 from app.routers import health, auth, albums, images, audio, upload, location, users, friends, notifications
 from app.services.notification_service import run_daily_anniversary_job
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 settings = get_settings()
 
 
 async def _anniversary_scheduler_loop():
-    """Run the anniversary job every 24 hours."""
+    """Run the anniversary job every hour so users get notified when they arrive at a place later in the day."""
     while True:
-        await asyncio.sleep(24 * 60 * 60)  # 24 hours
         db = SessionLocal()
         try:
             await asyncio.to_thread(run_daily_anniversary_job, db)
         finally:
             db.close()
+        await asyncio.sleep(60 * 60)  # 1 hour
 
 
 @asynccontextmanager

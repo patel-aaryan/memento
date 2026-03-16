@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Base URL for friend invite links (e.g. https://api.memento.app)
     app_base_url: str = "http://localhost:8000"
 
+    # Timezone for anniversary "today" (e.g. America/New_York, UTC)
+    anniversary_timezone: str = "America/New_York"
+
     class Config:
         env_file = ".env"
 

@@ -1,4 +1,7 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from app.config.settings import get_settings
 import logging
 from math import atan2, cos, radians, sin, sqrt
 
@@ -36,19 +39,22 @@ def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 async def get_nearest_place(
     lat: float = Query(..., description="Latitude in decimal degrees"),
     lng: float = Query(..., description="Longitude in decimal degrees"),
-    radius_m: int = Query(100, description="Search radius in meters (max 10m)"),
+    radius_m: int = Query(
+        100, description="Search radius in meters (max 10m)"),
 ):
     """
     Return the nearest place display name for the given coordinates using
     the Google Places API (via `nearest_place_display_name` service).
     """
-    logger.info("GET /location/nearest-place called (lat=%s, lng=%s, radius_m=%s)", lat, lng, radius_m)
+    logger.info(
+        "GET /location/nearest-place called (lat=%s, lng=%s, radius_m=%s)", lat, lng, radius_m)
     logger.info(
         "Nearest-place lookup requested",
         extra={"lat": lat, "lng": lng, "radius_m": radius_m},
     )
     try:
-        place_name = nearest_place_display_name(lat=lat, lng=lng, radius_m=radius_m)
+        place_name = nearest_place_display_name(
+            lat=lat, lng=lng, radius_m=radius_m)
     except RuntimeError as exc:
         # Typically raised when the API key is missing or misconfigured
         logger.error("Location service failed: %s", exc, exc_info=True)
@@ -71,7 +77,8 @@ async def get_nearest_place(
 
 @router.get("/autocomplete")
 async def location_autocomplete(
-    q: str = Query(..., min_length=1, description="Search query for place suggestions"),
+    q: str = Query(..., min_length=1,
+                   description="Search query for place suggestions"),
 ):
     """
     Return place suggestions for the given input using Google Places Autocomplete (New).
@@ -108,7 +115,8 @@ async def location_place_details(
 async def anniversary_check(
     lat: float = Query(..., description="Current latitude"),
     lng: float = Query(..., description="Current longitude"),
-    radius_m: float = Query(5000.0, gt=0.0, le=5000.0, description="Match radius in meters"),
+    radius_m: float = Query(5000.0, gt=0.0, le=5000.0,
+                            description="Match radius in meters"),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -119,7 +127,8 @@ async def anniversary_check(
     - has_match: bool
     - matches: up to a few closest matches with image_id/album_id/distance_m
     """
-    today = date.today()
+    tz = ZoneInfo(get_settings().anniversary_timezone)
+    today = datetime.now(tz).date()
     try:
         # Try exact same calendar day one year earlier (handles most dates)
         target_date = today.replace(year=today.year - 1)
@@ -169,4 +178,3 @@ async def anniversary_check(
     )
 
     return {"has_match": has_match, "matches": matches_sorted}
-
