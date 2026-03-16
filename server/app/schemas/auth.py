@@ -34,3 +34,22 @@ class UserUpdate(BaseModel):
     """Fields that can be updated by the user (PATCH /auth/me)."""
     name: Optional[str] = None
     profile_picture_url: Optional[str] = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class ForgotPasswordResponse(MessageResponse):
+    # Only populated when debug=True to make local testing easier.
+    debug_code: Optional[str] = None

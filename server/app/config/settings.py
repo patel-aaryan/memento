@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     secret_key: str = "your-secret-key-change-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24 hours
-    
+    password_reset_code_expire_minutes: int = 15
+
     # Cloudinary settings
     cloudinary_cloud_name: str = ""
     cloudinary_api_key: str = ""
@@ -16,6 +17,10 @@ class Settings(BaseSettings):
 
     # Google API settings
     google_api_key: str = ""
+
+    # Resend settings (used for password reset emails)
+    resend_api_key: str = ""
+    resend_from_email: str = ""
 
     # Base URL for friend invite links (e.g. https://api.memento.app)
     app_base_url: str = "http://localhost:8000"

@@ -147,6 +147,8 @@ class MainActivity : ComponentActivity() {
                 val cameraBuffer = remember { mutableStateListOf<SelectedImage>() }
                 var showCameraBufferOverlay by remember { mutableStateOf(false) }
                 var cameraTargetAlbumId by remember { mutableStateOf<Int?>(null) }
+                var pendingCameraPermissionTargetAlbumId by remember { mutableStateOf<Int?>(null) }
+                var cameraErrorMessage by remember { mutableStateOf<String?>(null) }
                 var pendingHomePhotoEntry by rememberSaveable { mutableStateOf<HomePhotoMetadata?>(null) }
                 var pendingAlbumPhotoEntry by remember { mutableStateOf<Pair<HomePhotoMetadata, Int>?>(null) }
                 var pendingMultiplePhotos by remember { mutableStateOf<List<SelectedImage>?>(null) }
@@ -479,16 +481,52 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                fun launchCamera(targetAlbumId: Int?) {
+                lateinit var launchCamera: (Int?) -> Unit
+                val cameraPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { granted ->
+                    val targetAlbumId = pendingCameraPermissionTargetAlbumId
+                    pendingCameraPermissionTargetAlbumId = null
+                    if (granted) {
+                        launchCamera(targetAlbumId)
+                    } else {
+                        cameraErrorMessage = "Camera permission is required to take photos. Please allow camera access and try again."
+                    }
+                }
+
+                launchCamera = { targetAlbumId ->
                     cameraTargetAlbumId = targetAlbumId
-                    val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
-                    pendingCameraFile = file
-                    pendingCameraUri = FileProvider.getUriForFile(
+                    try {
+                        val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+                        pendingCameraFile = file
+                        pendingCameraUri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file
+                        )
+                        pendingCameraUri?.let { takePictureLauncher.launch(it) }
+                    } catch (e: SecurityException) {
+                        pendingCameraFile = null
+                        pendingCameraUri = null
+                        cameraErrorMessage = "Unable to open camera because permission was denied."
+                    } catch (e: Exception) {
+                        pendingCameraFile = null
+                        pendingCameraUri = null
+                        cameraErrorMessage = "Unable to open camera right now. Please try again."
+                    }
+                }
+
+                fun requestCameraAndLaunch(targetAlbumId: Int?) {
+                    val hasPermission = ContextCompat.checkSelfPermission(
                         context,
-                        "${context.packageName}.fileprovider",
-                        file
-                    )
-                    pendingCameraUri?.let { takePictureLauncher.launch(it) }
+                        Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (hasPermission) {
+                        launchCamera(targetAlbumId)
+                    } else {
+                        pendingCameraPermissionTargetAlbumId = targetAlbumId
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                 }
 
                 val pickPhotoLauncher = rememberLauncherForActivityResult(
@@ -559,7 +597,7 @@ class MainActivity : ComponentActivity() {
 
                 fun onAddPhoto(source: AddPhotoSource) {
                     when (source) {
-                        AddPhotoSource.Camera -> launchCamera(selectedAlbumId)
+                        AddPhotoSource.Camera -> requestCameraAndLaunch(selectedAlbumId)
                         AddPhotoSource.Photos -> {
                             if (selectedAlbumId != null) {
                                 pickMultiplePhotosLauncher.launch("image/*")
@@ -572,7 +610,7 @@ class MainActivity : ComponentActivity() {
 
                 fun onHomeAction(action: HomeAddAction) {
                     when (action) {
-                        HomeAddAction.Camera -> launchCamera(null)
+                        HomeAddAction.Camera -> requestCameraAndLaunch(null)
                         HomeAddAction.Photos -> pickMultiplePhotosLauncher.launch("image/*")
                         HomeAddAction.MakeAlbum -> {
                             showCreateAlbumDialog = true
@@ -585,6 +623,19 @@ class MainActivity : ComponentActivity() {
 
                 @OptIn(ExperimentalMaterial3Api::class)
                 Box(Modifier.fillMaxSize()) {
+                    if (!cameraErrorMessage.isNullOrBlank()) {
+                        AlertDialog(
+                            onDismissRequest = { cameraErrorMessage = null },
+                            title = { Text("Camera unavailable") },
+                            text = { Text(cameraErrorMessage ?: "") },
+                            confirmButton = {
+                                TextButton(onClick = { cameraErrorMessage = null }) {
+                                    Text("OK")
+                                }
+                            }
+                        )
+                    }
+
                     when {
                         showFriendPicker && pendingAlbumIdForFriend != null -> {
                             BackHandler {
@@ -1178,7 +1229,7 @@ class MainActivity : ComponentActivity() {
                                 Button(
                                     onClick = {
                                         showCameraBufferOverlay = false
-                                        launchCamera(cameraTargetAlbumId)
+                                        requestCameraAndLaunch(cameraTargetAlbumId)
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {

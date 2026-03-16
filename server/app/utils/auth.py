@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import hashlib
+import hmac
+import secrets
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.config.settings import get_settings
@@ -46,3 +49,17 @@ def decode_access_token(token: str) -> Optional[dict]:
         # Catch any other errors (like expired token, invalid format, etc.)
         print(f"Token decode error: {e}")
         return None
+
+
+def generate_reset_code() -> str:
+    """Generate a 6-digit numeric OTP for password reset."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def hash_reset_code(email: str, code: str) -> str:
+    """
+    Hash a reset code using HMAC-SHA256 with SECRET_KEY as pepper.
+    This avoids storing the raw OTP in the database.
+    """
+    message = f"{email.strip().lower()}:{code}".encode("utf-8")
+    return hmac.new(settings.secret_key.encode("utf-8"), message, hashlib.sha256).hexdigest()

@@ -3,6 +3,7 @@ from . import album_member_repository
 from . import device_repository
 from . import image_repository
 from . import audio_repository
+from . import password_reset_repository
 
 __all__ = [
     "album_repository",
@@ -10,5 +11,5 @@ __all__ = [
     "device_repository",
     "image_repository",
     "audio_repository",
+    "password_reset_repository",
 ]
-

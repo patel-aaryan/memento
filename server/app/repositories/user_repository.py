@@ -133,3 +133,29 @@ def update_user(db: Session, user_id: int, **fields: Any) -> Optional[dict]:
     except Exception as e:
         db.rollback()
         raise e
+
+
+def update_user_password_hash(db: Session, user_id: int, password_hash: str) -> bool:
+    """Update only the password hash for the user."""
+    query = text(
+        """
+        UPDATE users
+        SET password_hash = :password_hash
+        WHERE id = :user_id
+        RETURNING id
+        """
+    )
+    try:
+        result = db.execute(
+            query,
+            {
+                "user_id": user_id,
+                "password_hash": password_hash,
+            },
+        )
+        row = result.fetchone()
+        db.commit()
+        return row is not None
+    except Exception as e:
+        db.rollback()
+        raise e
