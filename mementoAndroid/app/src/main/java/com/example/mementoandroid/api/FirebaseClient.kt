@@ -67,6 +67,18 @@ class FirebaseClient : FirebaseMessagingService() {
                     handleAnniversaryLocationCheck()
                 }
             }
+            "album_invite" -> {
+                val title = remoteMessage.notification?.title ?: "Memento"
+                val body = remoteMessage.notification?.body ?: "You were added to an album"
+                val albumId = remoteMessage.data["album_id"]?.toIntOrNull()
+                showNotification(title, body, albumId = albumId)
+            }
+            "album_activity" -> {
+                val title = remoteMessage.notification?.title ?: "Memento"
+                val body = remoteMessage.notification?.body ?: "New photo in album"
+                val albumId = remoteMessage.data["album_id"]?.toIntOrNull()
+                showNotification(title, body, albumId = albumId)
+            }
             else -> {
                 val title = remoteMessage.notification?.title ?: "Memento"
                 val body = remoteMessage.notification?.body ?: "New notification"
@@ -111,7 +123,7 @@ class FirebaseClient : FirebaseMessagingService() {
         }
     }
 
-    private fun showNotification(title: String, body: String) {
+    private fun showNotification(title: String, body: String, albumId: Int? = null) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -128,6 +140,9 @@ class FirebaseClient : FirebaseMessagingService() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            if (albumId != null && albumId > 0) {
+                putExtra("album_id", albumId)
+            }
         }
         val pendingIntent = PendingIntent.getActivity(
             this,

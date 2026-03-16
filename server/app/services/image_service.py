@@ -1,9 +1,13 @@
+import logging
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.repositories import image_repository, album_repository, album_member_repository
+from app.repositories.user_repository import get_user_by_id
 from app.schemas.image import ImageCreate, ImageUpdate, ImageResponse
-from app.services import album_service
+from app.services import album_service, notification_service
+
+logger = logging.getLogger(__name__)
 
 
 def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageResponse:
@@ -44,6 +48,39 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create image"
+        )
+    
+    # Send push notifications to other album members when a new photo is added
+    try:
+        album = album_repository.get_album_by_id(db, album_id)
+        if album:
+            members = album_member_repository.get_album_members(db, album_id)
+            owner_id = album["owner_id"]
+            all_member_ids = list({owner_id} | {m["user_id"] for m in members})
+            notify_user_ids = [uid for uid in all_member_ids if uid != user_id]
+            if notify_user_ids:
+                uploader = get_user_by_id(db, user_id)
+                uploader_name = uploader["name"] if uploader else "Someone"
+                album_name = album["name"]
+                title = "New photo in album"
+                body = f'{uploader_name} added a photo to "{album_name}"'
+                data = {"type": "album_activity", "album_id": str(album_id)}
+                for uid in notify_user_ids:
+                    try:
+                        notification_service.send_push_to_user(
+                            db, uid, title, body, data=data
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to send album activity notification to user_id=%s: %s",
+                            uid,
+                            e,
+                        )
+    except Exception as e:
+        logger.warning(
+            "Failed to send album activity notifications for album_id=%s: %s",
+            album_id,
+            e,
         )
     
     return ImageResponse(**image)

@@ -1,10 +1,14 @@
+import logging
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.repositories import album_repository, album_member_repository, image_repository
-from app.repositories.user_repository import get_users_by_ids
+from app.repositories.user_repository import get_users_by_ids, get_user_by_id
 from app.schemas.album import AlbumCreate, AlbumUpdate, AlbumResponse, AlbumMemberAdd
 from app.schemas.auth import UserResponse
+from app.services import notification_service
+
+logger = logging.getLogger(__name__)
 
 
 PERSONAL_ALBUM_NAME = "My Photos"
@@ -155,6 +159,26 @@ def add_album_member(db: Session, album_id: int, member_data: AlbumMemberAdd, us
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="User is already a member of this album"
+        )
+    
+    # Send push notification to the invited user
+    try:
+        inviter = get_user_by_id(db, user_id)
+        if inviter:
+            title = "Album invite"
+            body = f"{inviter['name']} added you to the album \"{album['name']}\""
+            notification_service.send_push_to_user(
+                db,
+                member_data.user_id,
+                title,
+                body,
+                data={"type": "album_invite", "album_id": str(album_id)}
+            )
+    except Exception as e:
+        logger.warning(
+            "Failed to send album invite notification to user_id=%s: %s",
+            member_data.user_id,
+            e
         )
     
     return member

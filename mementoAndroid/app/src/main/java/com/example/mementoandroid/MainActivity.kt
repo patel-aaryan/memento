@@ -106,6 +106,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        intent?.let { newIntent ->
+            val albumId = newIntent.getIntExtra("album_id", -1).takeIf { it > 0 }
+            if (albumId != null) {
+                // Update the intent so the composable can read it
+                setIntent(newIntent)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
@@ -131,7 +142,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             MementoAndroidTheme {
                 val context = LocalContext.current as ComponentActivity
-                var selectedAlbumId by rememberSaveable { mutableStateOf<Int?>(null) }
+                val initialAlbumId = intent.getIntExtra("album_id", -1).takeIf { it > 0 }
+                var selectedAlbumId by rememberSaveable { mutableStateOf(initialAlbumId) }
                 var selectedPhotoId by rememberSaveable { mutableStateOf<String?>(null) }
                 var currentPhotoIndex by rememberSaveable { mutableStateOf(0) }
                 var albums by remember { mutableStateOf<List<AlbumUi>>(emptyList()) }
@@ -247,6 +259,8 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         .onFailure { handle401(context, it) }
+                    // Clear the album_id intent extra after consuming it
+                    intent.removeExtra("album_id")
                 }
 
                 LaunchedEffect(selectedAlbumId) {
