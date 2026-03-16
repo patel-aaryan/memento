@@ -19,6 +19,10 @@ class RegisterDeviceRequest(BaseModel):
     fcm_token: str
 
 
+class UnregisterDeviceRequest(BaseModel):
+    fcm_token: str
+
+
 @router.post(
     "/register-device",
     dependencies=[Security(security)],
@@ -31,6 +35,23 @@ async def register_device(
     """Register or update the current device's FCM token. Called from onNewToken when logged in."""
     if request.fcm_token:
         device_repository.upsert_device_token(db, current_user["id"], request.fcm_token)
+    return {"success": True}
+
+
+@router.post(
+    "/unregister-device",
+    dependencies=[Security(security)],
+)
+async def unregister_device(
+    request: UnregisterDeviceRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove the current device's FCM token. Called when the user signs out."""
+    if request.fcm_token:
+        device_repository.remove_device_token_for_user(
+            db, current_user["id"], request.fcm_token
+        )
     return {"success": True}
 
 

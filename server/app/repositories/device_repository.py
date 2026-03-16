@@ -43,3 +43,14 @@ def remove_device_token(db: Session, fcm_token: str) -> None:
     """)
     db.execute(query, {"fcm_token": fcm_token})
     db.commit()
+
+
+def remove_device_token_for_user(db: Session, user_id: int, fcm_token: str) -> None:
+    """Remove a device token for a specific user. Only removes if both user_id and fcm_token match."""
+    if not fcm_token or not fcm_token.strip():
+        return
+    query = text("""
+        DELETE FROM user_devices WHERE user_id = :user_id AND fcm_token = :fcm_token
+    """)
+    db.execute(query, {"user_id": user_id, "fcm_token": fcm_token.strip()})
+    db.commit()

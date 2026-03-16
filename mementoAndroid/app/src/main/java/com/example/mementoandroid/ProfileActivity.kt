@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import coil.compose.AsyncImage
 import com.example.mementoandroid.api.BackendClient
 import com.example.mementoandroid.api.BackendException
+import com.example.mementoandroid.api.getFcmToken
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.components.AddPhotoBottomSheet
 import com.example.mementoandroid.util.AuthTokenStore
@@ -289,11 +290,26 @@ class ProfileActivity : ComponentActivity() {
                 }
 
                 fun logout() {
-                    AuthTokenStore.clear()
-                    startActivity(Intent(context, LoginActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                    })
-                    finish()
+                    scope.launch {
+                        val t = AuthTokenStore.get()
+                        if (t != null) {
+                            val fcmToken = getFcmToken()
+                            if (fcmToken != null) {
+                                BackendClient.post(
+                                    "/notifications/unregister-device",
+                                    JSONObject().put("fcm_token", fcmToken),
+                                    t
+                                ).onFailure { Log.w(TAG, "Failed to unregister device: $it") }
+                            }
+                        }
+                        withContext(Dispatchers.Main) {
+                            AuthTokenStore.clear()
+                            startActivity(Intent(context, LoginActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            })
+                            finish()
+                        }
+                    }
                 }
 
                 ProfileScreen(
