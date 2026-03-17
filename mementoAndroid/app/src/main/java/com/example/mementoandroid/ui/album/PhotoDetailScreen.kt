@@ -71,6 +71,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
@@ -122,6 +124,8 @@ fun PhotoDetailScreen(
     allPhotos: List<AlbumPhotoUi>? = null,
     currentPhotoIndex: Int = 0,
     onPhotoIndexChange: (Int) -> Unit = {},
+    uploaderName: String? = null,
+    uploaderProfilePicUrl: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -362,7 +366,7 @@ fun PhotoDetailScreen(
                 )
                 .verticalScroll(rememberScrollState())
         ) {
-              Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(20.dp))
             // Up arrow: above photo (when multiple photos; hidden in edit mode)
             if (!isEditMode && allPhotos != null && allPhotos.size > 1) {
                 Row(
@@ -806,21 +810,32 @@ fun PhotoDetailScreen(
                     }
                 }
 
-                // Uploader (group albums only) — between location and audio; hide until metadata ready
-                if (metadataReady && mock.uploaderName != null) {
+                // 👇 NEW: Uploader info (shared albums only)
+                if (metadataReady && uploaderName != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (!uploaderProfilePicUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = uploaderProfilePicUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Text(
-                            text = "Added by ${mock.uploaderName}",
+                            text = "Added by $uploaderName",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
