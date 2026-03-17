@@ -917,7 +917,12 @@ class MainActivity : ComponentActivity() {
                                 val albumOwnerId = albums.find { it.id == aid }?.ownerId
                                 val currentUserId = AuthTokenStore.getUserId()
                                 val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
-                                    (photoToShow.userId != null && currentUserId != null && currentUserId == photoToShow.userId)
+                                        (photoToShow.userId != null && currentUserId != null && currentUserId == photoToShow.userId)
+                                val canEditPhoto = currentUserId != null && currentUserId == photoToShow.userId
+
+                                val uploaderName = null
+                                val uploaderProfilePic = null
+
                                 PhotoDetailScreen(
                                     photo = photoToShow,
                                     albumName = albumName,
@@ -929,6 +934,7 @@ class MainActivity : ComponentActivity() {
                                         photoDetailFromStandalone = false
                                     },
                                     canDeletePhoto = canDeletePhoto,
+                                    canEditPhoto = canEditPhoto,
                                     allPhotos = if (list.size > 1) list else null,
                                     currentPhotoIndex = displayIdx,
                                     onPhotoIndexChange = { newIdx ->
@@ -1018,7 +1024,9 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
                                         }
-                                    }
+                                    },
+                                    uploaderName = uploaderName,
+                                    uploaderProfilePicUrl = uploaderProfilePic
                                 )
                             } else {
                                 pendingStandalonePhotoDetail = null
@@ -1058,111 +1066,122 @@ class MainActivity : ComponentActivity() {
                             val photo = filteredAlbumPhotos.getOrNull(currentPhotoIndex) ?: filteredAlbumPhotos.find { it.id == selectedPhotoId }
                             if (photo != null || isRefreshingAlbumImages) {
                                 if (photo != null) {
-                                val photoToDelete = photo
-                                val albumOwnerId = selectedAlbumId?.let { aid -> albums.find { it.id == aid }?.ownerId }
-                                val currentUserId = AuthTokenStore.getUserId()
-                                val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
-                                        (photoToDelete.userId != null && currentUserId != null && currentUserId == photoToDelete.userId)
-                                PhotoDetailScreen(
-                                    photo = photoToDelete,
-                                    albumName = albumName,
-                                    mock = getPhotoDetailMock(albumName, photoToDelete.id),
-                                    onBack = {
-                                        if (photoDetailFromStandalone) {
-                                            selectedPhotoId = null
-                                            selectedAlbumId = null
-                                            photoDetailFromStandalone = false
-                                        } else {
-                                            selectedPhotoId = null
-                                        }
-                                    },
-                                    canDeletePhoto = canDeletePhoto,
-                                    allPhotos = if (filteredAlbumPhotos.size > 1) filteredAlbumPhotos else null,
-                                    currentPhotoIndex = currentPhotoIndex,
-                                    onPhotoIndexChange = { currentPhotoIndex = it.coerceIn(0, filteredAlbumPhotos.size - 1) },
-                                    onDeleteAudio = {
-                                        scope.launch {
-                                            val t = AuthTokenStore.get() ?: return@launch
-                                            val body = JSONObject().put("audio_url", JSONObject.NULL)
-                                            val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
-                                            withContext(Dispatchers.Main) {
-                                                result.onFailure { handle401(context, it) }
-                                                if (result.isSuccess) {
-                                                    photoIdToSelectAfterRefresh = selectedPhotoId
-                                                    loadAlbumImages()
-                                                }
-                                                Toast.makeText(
-                                                    context,
-                                                    if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
+                                    val photoToDelete = photo
+                                    val albumOwnerId = selectedAlbumId?.let { aid -> albums.find { it.id == aid }?.ownerId }
+                                    val currentUserId = AuthTokenStore.getUserId()
+                                    val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
+                                            (photoToDelete.userId != null && currentUserId != null && currentUserId == photoToDelete.userId)
+                                    val canEditPhoto = currentUserId != null && currentUserId == photoToDelete.userId
+
+                                    // 👇 NEW: Look up uploader info from albumMembers
+                                    val uploader = albumMembers.find { it.id == photoToDelete.userId?.toString() }
+                                    val uploaderName = uploader?.username
+                                    val uploaderProfilePic = uploader?.profilePictureUrl
+
+                                    PhotoDetailScreen(
+                                        photo = photoToDelete,
+                                        albumName = albumName,
+                                        mock = getPhotoDetailMock(albumName, photoToDelete.id),
+                                        onBack = {
+                                            if (photoDetailFromStandalone) {
+                                                selectedPhotoId = null
+                                                selectedAlbumId = null
+                                                photoDetailFromStandalone = false
+                                            } else {
+                                                selectedPhotoId = null
                                             }
-                                        }
-                                    },
-                                    onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
-                                        scope.launch {
-                                            val t = AuthTokenStore.get() ?: return@launch
-                                            var audioUrl: String? = null
-                                            if (!audioFilePath.isNullOrBlank()) {
-                                                val file = java.io.File(audioFilePath)
-                                                if (file.exists()) {
-                                                    audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
-                                                }
-                                            }
-                                            val body = JSONObject().apply {
-                                                put("caption", caption)
-                                                takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
-                                                latitude?.let { put("latitude", it) }
-                                                longitude?.let { put("longitude", it) }
-                                                audioUrl?.let { put("audio_url", it) }
-                                            }
-                                            val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
-                                            withContext(Dispatchers.Main) {
-                                                result.onFailure { handle401(context, it) }
-                                                if (result.isSuccess) {
-                                                    photoIdToSelectAfterRefresh = selectedPhotoId
-                                                    loadAlbumImages()
-                                                }
-                                                Toast.makeText(
-                                                    context,
-                                                    if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    },
-                                    onDeletePhoto = {
-                                        scope.launch {
-                                            val t = AuthTokenStore.get()
-                                            withContext(Dispatchers.Main) {
-                                                if (t == null) {
-                                                    Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
-                                                    return@withContext
-                                                }
-                                            }
-                                            val result = BackendClient.delete("/images/${photoToDelete.id}", token = t)
-                                            withContext(Dispatchers.Main) {
-                                                result.onFailure { e ->
-                                                    handle401(context, e)
+                                        },
+                                        canDeletePhoto = canDeletePhoto,
+                                        canEditPhoto = canEditPhoto,
+                                        allPhotos = if (filteredAlbumPhotos.size > 1) filteredAlbumPhotos else null,
+                                        currentPhotoIndex = currentPhotoIndex,
+                                        onPhotoIndexChange = { currentPhotoIndex = it.coerceIn(0, filteredAlbumPhotos.size - 1) },
+                                        onDeleteAudio = {
+                                            scope.launch {
+                                                val t = AuthTokenStore.get() ?: return@launch
+                                                val body = JSONObject().put("audio_url", JSONObject.NULL)
+                                                val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                                withContext(Dispatchers.Main) {
+                                                    result.onFailure { handle401(context, it) }
+                                                    if (result.isSuccess) {
+                                                        photoIdToSelectAfterRefresh = selectedPhotoId
+                                                        loadAlbumImages()
+                                                    }
                                                     Toast.makeText(
                                                         context,
-                                                        (e as? BackendException)?.message ?: "Failed to delete",
+                                                        if (result.isSuccess) "Audio removed" else result.exceptionOrNull()?.message ?: "Failed",
                                                         Toast.LENGTH_SHORT
                                                     ).show()
                                                 }
-                                                if (result.isSuccess) {
-                                                    photos.removeAll { it.id == photoToDelete.id }
-                                                    selectedPhotoId = null
-                                                    if (photoDetailFromStandalone) {
-                                                        selectedAlbumId = null
-                                                        photoDetailFromStandalone = false
+                                            }
+                                        },
+                                        onSave = { caption, takenAt, latitude, longitude, audioFilePath ->
+                                            scope.launch {
+                                                val t = AuthTokenStore.get() ?: return@launch
+                                                var audioUrl: String? = null
+                                                if (!audioFilePath.isNullOrBlank()) {
+                                                    val file = java.io.File(audioFilePath)
+                                                    if (file.exists()) {
+                                                        audioUrl = CloudinaryHelper.uploadAudio(context, file, t)
                                                     }
-                                                    Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                                                }
+                                                val body = JSONObject().apply {
+                                                    put("caption", caption)
+                                                    takenAt?.takeIf { it.isNotBlank() }?.let { put("taken_at", it) }
+                                                    latitude?.let { put("latitude", it) }
+                                                    longitude?.let { put("longitude", it) }
+                                                    audioUrl?.let { put("audio_url", it) }
+                                                }
+                                                val result = BackendClient.put("/images/${photoToDelete.id}", body, token = t)
+                                                withContext(Dispatchers.Main) {
+                                                    result.onFailure { handle401(context, it) }
+                                                    if (result.isSuccess) {
+                                                        photoIdToSelectAfterRefresh = selectedPhotoId
+                                                        loadAlbumImages()
+                                                    }
+                                                    Toast.makeText(
+                                                        context,
+                                                        if (result.isSuccess) "Saved" else result.exceptionOrNull()?.message ?: "Failed to save",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                 }
                                             }
-                                        }
-                                    }
-                                )
+                                        },
+                                        onDeletePhoto = {
+                                            scope.launch {
+                                                val t = AuthTokenStore.get()
+                                                withContext(Dispatchers.Main) {
+                                                    if (t == null) {
+                                                        Toast.makeText(context, "Not logged in", Toast.LENGTH_SHORT).show()
+                                                        return@withContext
+                                                    }
+                                                }
+                                                val result = BackendClient.delete("/images/${photoToDelete.id}", token = t)
+                                                withContext(Dispatchers.Main) {
+                                                    result.onFailure { e ->
+                                                        handle401(context, e)
+                                                        Toast.makeText(
+                                                            context,
+                                                            (e as? BackendException)?.message ?: "Failed to delete",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                    if (result.isSuccess) {
+                                                        photos.removeAll { it.id == photoToDelete.id }
+                                                        selectedPhotoId = null
+                                                        if (photoDetailFromStandalone) {
+                                                            selectedAlbumId = null
+                                                            photoDetailFromStandalone = false
+                                                        }
+                                                        Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        // 👇 NEW: Pass uploader info
+                                        uploaderName = uploaderName,
+                                        uploaderProfilePicUrl = uploaderProfilePic
+                                    )
                                 } else {
                                     if (!isRefreshingAlbumImages) selectedPhotoId = null
                                 }
