@@ -8,62 +8,65 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Shader
+import android.os.Build
+import androidx.annotation.RequiresApi
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toBitmap
+import androidx.core.graphics.scale
+import coil.ImageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import com.example.mementoandroid.R
+import com.example.mementoandroid.ui.album.AlbumPhotoUi
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapEffect
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
-import androidx.core.graphics.scale
-import androidx.core.graphics.createBitmap
-import com.example.mementoandroid.R
-import com.example.mementoandroid.ui.album.AlbumPhotoUi
-import android.net.Uri
-import android.os.Build
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.core.graphics.drawable.toBitmap
-import coil.ImageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.UiSettings
-import com.google.android.gms.maps.model.LatLngBounds
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import android.text.format.DateUtils
-import android.util.Log
-import androidx.annotation.RequiresApi
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.Canvas
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.platform.LocalDensity
-import com.google.maps.android.compose.MapEffect
-import java.text.SimpleDateFormat
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
@@ -76,6 +79,9 @@ import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import androidx.compose.ui.graphics.Color as ComposeColor
+import android.util.Log
+import androidx.compose.ui.graphics.StrokeCap
 
 fun interpolateColor(colorStart: Int, colorEnd: Int, fraction: Float): Int {
     val startA = Color.alpha(colorStart)
@@ -139,6 +145,32 @@ fun extractDate(takenAt: String?): LocalDate? {
     } catch (e: Exception) {
         null
     }
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+fun extractTimelineDate(photo: AlbumPhotoUi): LocalDate? {
+    // Keep this in sync with how album sorting / detail screen pick the primary time:
+    // prefer takenAt, then fall back to dateAdded.
+    val candidates = listOfNotNull(photo.takenAt, photo.dateAdded)
+    for (raw in candidates) {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty() || trimmed == "null") continue
+
+        // Most robust: try to parse full offset datetime (backend-style), then fall back to date-only prefix.
+        try {
+            val normalized = trimmed.replace(' ', 'T')
+            return OffsetDateTime.parse(normalized).toLocalDate()
+        } catch (_: Exception) {
+        }
+
+        if (trimmed.length >= 10) {
+            try {
+                return LocalDate.parse(trimmed.substring(0, 10))
+            } catch (_: Exception) {
+            }
+        }
+    }
+    return null
 }
 
 suspend fun loadPhotoBitmap(context: Context, photo: AlbumPhotoUi): Bitmap? {
@@ -348,8 +380,43 @@ fun MapScreen(
     }
     val cameraPositionState = rememberCameraPositionState()
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    var mapSizePx by remember { mutableStateOf(IntSize.Zero) }
+
+    data class MissingInfoEntry(
+        val photo: AlbumPhotoUi,
+        val description: String
+    )
+
+    val missingInfoEntries = remember(photos) {
+        photos.flatMap { photo ->
+            val list = mutableListOf<MissingInfoEntry>()
+            val hasLocation = photo.latitude != null && photo.longitude != null
+            if (!hasLocation) {
+                list.add(MissingInfoEntry(photo, "Missing location"))
+            }
+            val hasTime = extractTimelineDate(photo) != null
+            if (!hasTime) {
+                list.add(MissingInfoEntry(photo, "Missing time"))
+            }
+            list
+        }
+    }
+    val missingImagesCount = remember(missingInfoEntries) {
+        missingInfoEntries.map { it.photo.id }.toSet().size
+    }
+    var showMissingInfoDialog by remember { mutableStateOf(false) }
+
+    // Debug log: all image times in this album (raw + parsed as used for coloring).
+    LaunchedEffect(photos) {
+        Log.d("MapScreenDebug", "----- Album photo times (${photos.size}) -----")
+        photos.forEach { photo ->
+            val parsedDate = extractTimelineDate(photo)
+            Log.d(
+                "MapScreenDebug",
+                "id=${photo.id}, takenAt=${photo.takenAt}, dateAdded=${photo.dateAdded}, timelineDate=$parsedDate, lat=${photo.latitude}, lng=${photo.longitude}"
+            )
+        }
+        Log.d("MapScreenDebug", "----------------------------------------------")
+    }
 
     // Calculate window to include all photos
     LaunchedEffect(photosWithLocation) {
@@ -400,8 +467,9 @@ fun MapScreen(
         )
     )
 
-    // Find first and last times
-    val photoDates = photosWithLocation.mapNotNull { extractDate(it.dateAdded) }
+    // Find first and last times over the whole album (not just photos with location),
+    // using the same precedence as sorting/detail screens (takenAt, then dateAdded).
+    val photoDates = remember(photos) { photos.mapNotNull { extractTimelineDate(it) } }
 
     val firstDate = photoDates.minOrNull()
     val lastDate = photoDates.maxOrNull()
@@ -413,280 +481,349 @@ fun MapScreen(
     var clusters by remember { mutableStateOf<List<PhotoCluster>>(emptyList()) }
     var mapRef by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .onSizeChanged { mapSizePx = it }
-    ) {
-        GoogleMap(
-//        modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = mapProperties,
-            uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxSize()
         ) {
-            MapEffect(photosWithLocation) { map ->
-                mapRef = map
+            GoogleMap(
+//        modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = mapProperties,
+                uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false)
+            ) {
+                MapEffect(photosWithLocation) { map ->
+                    mapRef = map
 
-                fun updateClusters() {
-                    clusters = clusterPhotosFast(map, photosWithLocation)
-                }
+                    fun updateClusters() {
+                        clusters = clusterPhotosFast(map, photosWithLocation)
+                    }
 
-                map.setOnCameraIdleListener {
+                    map.setOnCameraIdleListener {
+                        updateClusters()
+                    }
+
                     updateClusters()
                 }
 
-                updateClusters()
-            }
+                // Also recompute clusters when zoom changes (some devices/paths don't reliably hit idle).
+                LaunchedEffect(mapRef, photosWithLocation) {
+                    val map = mapRef ?: return@LaunchedEffect
+                    snapshotFlow { cameraPositionState.position }
+                        .map { it.zoom }
+                        .distinctUntilChanged()
+                        .collect {
+                            clusters = clusterPhotosFast(map, photosWithLocation)
+                        }
+                }
 
-            // Also recompute clusters when zoom changes (some devices/paths don't reliably hit idle).
-            LaunchedEffect(mapRef, photosWithLocation) {
-                val map = mapRef ?: return@LaunchedEffect
-                snapshotFlow { cameraPositionState.position }
-                    .map { it.zoom }
-                    .distinctUntilChanged()
-                    .collect {
-                        clusters = clusterPhotosFast(map, photosWithLocation)
-                    }
-            }
-
-            // DEBUG
+                // DEBUG
 //        photosWithLocation.forEach { photo ->
 //            val takenAt = photo.dateAdded
 //            Log.d("MapDebug", "$takenAt")
 //        }
 //        Log.d("MapDebug", "$firstDate, $lastDate, $totalDays")
 
-            clusters.forEach { cluster ->
-                if (cluster.photos.size == 1) {
-                    val photo = cluster.photos.first()
-                    val lat = photo.latitude!!
-                    val lng = photo.longitude!!
+                clusters.forEach { cluster ->
+                    if (cluster.photos.size == 1) {
+                        val photo = cluster.photos.first()
+                        val lat = photo.latitude!!
+                        val lng = photo.longitude!!
 
-                    // Load bitmap asynchronously
-                    val markerBitmap by produceState<Bitmap?>(initialValue = null, photo) {
-                        value = loadPhotoBitmap(context, photo) // suspend function
-                    }
-
-                    // Compute fraction for border color
-                    val date = extractDate(photo.dateAdded)
-                    val daysSinceStart = if (date != null && firstDate != null) {
-                        ChronoUnit.DAYS.between(firstDate, date).toFloat()
-                    } else 0f
-                    val fraction = (daysSinceStart / totalDays).coerceIn(0f, 1f)
-                    val borderColor = interpolateColor(
-                        Color.RED,   // earliest
-                        Color.BLUE,  // latest
-                        fraction
-                    )
-                    // Create map marker
-                    val markerIcon = remember(markerBitmap) {
-                        markerBitmap?.let { createAvatarMarker(context, it, borderColor) }
-                    }
-
-                    Marker(
-                        state = MarkerState(cluster.position),
-                        icon = markerIcon,
-                        onClick = {
-                            onPhotoClick(photo.id)
-                            true
+                        // Load bitmap asynchronously
+                        val markerBitmap by produceState<Bitmap?>(initialValue = null, photo) {
+                            value = loadPhotoBitmap(context, photo) // suspend function
                         }
-                    )
-                } else {
-                    // Compute per-photo border colors (same as single-pin logic),
-                    // then use them to draw a segmented cluster ring.
-                    val segmentColors = remember(cluster.photos, firstDate, totalDays) {
-                        // Too many segments becomes unreadable; sample evenly for large clusters.
-                        val maxSegments = 24
-                        val src = cluster.photos
-                        val sampled =
-                            if (src.size <= maxSegments) src
-                            else {
-                                val step = src.size.toFloat() / maxSegments
-                                (0 until maxSegments).map { idx -> src[(idx * step).toInt().coerceIn(0, src.lastIndex)] }
-                            }
 
-                        sampled.map { p ->
-                            val date = extractDate(p.dateAdded)
-                            val daysSinceStart = if (date != null && firstDate != null) {
-                                ChronoUnit.DAYS.between(firstDate, date).toFloat()
-                            } else 0f
+                        // Compute border color: grey if no time, otherwise gradient.
+                        val date = extractTimelineDate(photo)
+                        val borderColor = if (date == null || firstDate == null) {
+                            Color.GRAY
+                        } else {
+                            val daysSinceStart = ChronoUnit.DAYS.between(firstDate, date).toFloat()
                             val fraction = (daysSinceStart / totalDays).coerceIn(0f, 1f)
-                            interpolateColor(Color.RED, Color.BLUE, fraction)
+                            interpolateColor(
+                                Color.RED,   // earliest
+                                Color.BLUE,  // latest
+                                fraction
+                            )
                         }
-                    }
 
-                    Marker(
-                        state = MarkerState(cluster.position),
-                        icon = createSegmentedClusterIcon(
-                            context = context,
-                            count = cluster.photos.size,
-                            segmentColors = segmentColors,
-                            sizeDp = 70,
-                            borderDp = 5,
-                        ),
-                        onClick = {
-                            val oldZoom = cameraPositionState.position.zoom
-                            val latLngs = cluster.photos.mapNotNull { p ->
-                                val lat = p.latitude
-                                val lng = p.longitude
-                                if (lat == null || lng == null) null else LatLng(lat, lng)
+                        // Create map marker (recreate if bitmap or border color changes)
+                        val markerIcon = remember(markerBitmap, borderColor) {
+                            markerBitmap?.let { createAvatarMarker(context, it, borderColor) }
+                        }
+
+                        Marker(
+                            state = MarkerState(cluster.position),
+                            icon = markerIcon,
+                            // Single pins sit "below" clusters when overlapping.
+                            zIndex = 0f,
+                            onClick = {
+                                onPhotoClick(photo.id)
+                                true
                             }
+                        )
+                    } else {
+                        // Compute per-photo border colors (same as single-pin logic),
+                        // then use them to draw a segmented cluster ring.
+                        val segmentColors = remember(cluster.photos, firstDate, totalDays) {
+                            // Too many segments becomes unreadable; sample evenly for large clusters.
+                            val maxSegments = 24
+                            val src = cluster.photos
+                            val sampled =
+                                if (src.size <= maxSegments) src
+                                else {
+                                    val step = src.size.toFloat() / maxSegments
+                                    (0 until maxSegments).map { idx -> src[(idx * step).toInt().coerceIn(0, src.lastIndex)] }
+                                }
 
-                            // Fit clicked cluster to view with padding. This is much more reliable
-                            // than "zoom + N" because it adapts to how spread out the cluster is.
-                            val moved = runCatching {
-                                if (latLngs.isEmpty()) return@runCatching false
+                            sampled.map { p ->
+                                val date = extractTimelineDate(p)
+                                if (date == null || firstDate == null) {
+                                    Color.GRAY
+                                } else {
+                                    val daysSinceStart = ChronoUnit.DAYS.between(firstDate, date).toFloat()
+                                    val fraction = (daysSinceStart / totalDays).coerceIn(0f, 1f)
+                                    interpolateColor(Color.RED, Color.BLUE, fraction)
+                                }
+                            }
+                        }
 
-                                val unique = latLngs.distinct()
-                                if (unique.size == 1) {
-                                    // Degenerate bounds (all points same). Just zoom in.
+                        Marker(
+                            state = MarkerState(cluster.position),
+                            icon = createSegmentedClusterIcon(
+                                context = context,
+                                count = cluster.photos.size,
+                                segmentColors = segmentColors,
+                                sizeDp = 70,
+                                borderDp = 5,
+                            ),
+                            // Make clusters sit above individual pins so taps prefer clusters.
+                            zIndex = 1f,
+                            onClick = {
+                                val oldZoom = cameraPositionState.position.zoom
+                                val latLngs = cluster.photos.mapNotNull { p ->
+                                    val lat = p.latitude
+                                    val lng = p.longitude
+                                    if (lat == null || lng == null) null else LatLng(lat, lng)
+                                }
+
+                                // Fit clicked cluster to view with padding. This is much more reliable
+                                // than "zoom + N" because it adapts to how spread out the cluster is.
+                                val moved = runCatching {
+                                    if (latLngs.isEmpty()) return@runCatching false
+
+                                    val unique = latLngs.distinct()
+                                    if (unique.size == 1) {
+                                        // Degenerate bounds (all points same). Just zoom in.
+                                        val targetZoom = (oldZoom + 2f).coerceAtMost(20f)
+                                        scope.launch {
+                                            cameraPositionState.animate(
+                                                CameraUpdateFactory.newLatLngZoom(unique.first(), targetZoom)
+                                            )
+                                        }
+                                        true
+                                    } else {
+                                        val b = LatLngBounds.builder()
+                                        unique.forEach { b.include(it) }
+                                        val bounds = b.build()
+                                        val paddingPx = 220
+                                        scope.launch {
+                                            cameraPositionState.animate(
+                                                CameraUpdateFactory.newLatLngBounds(bounds, paddingPx)
+                                            )
+                                        }
+                                        true
+                                    }
+                                }.getOrElse { false }
+
+                                if (!moved) {
+                                    // Fallback: at least attempt a zoom-in centered on cluster.
                                     val targetZoom = (oldZoom + 2f).coerceAtMost(20f)
                                     scope.launch {
                                         cameraPositionState.animate(
-                                            CameraUpdateFactory.newLatLngZoom(unique.first(), targetZoom)
+                                            CameraUpdateFactory.newLatLngZoom(cluster.position, targetZoom)
                                         )
                                     }
-                                    true
-                                } else {
-                                    val b = LatLngBounds.builder()
-                                    unique.forEach { b.include(it) }
-                                    val bounds = b.build()
-                                    val paddingPx = 220
-                                    scope.launch {
-                                        cameraPositionState.animate(
-                                            CameraUpdateFactory.newLatLngBounds(bounds, paddingPx)
-                                        )
-                                    }
-                                    true
                                 }
-                            }.getOrElse { false }
 
-                            if (!moved) {
-                                // Fallback: at least attempt a zoom-in centered on cluster.
-                                val targetZoom = (oldZoom + 2f).coerceAtMost(20f)
-                                scope.launch {
-                                    cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(cluster.position, targetZoom)
+                                true
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Yellow off-screen indicators for clusters/photos outside the viewport.
+            // Each tick is drawn on the edge pointing toward the off-screen cluster.
+//            Canvas(modifier = Modifier.fillMaxSize()) {
+//                val map = mapRef ?: return@Canvas
+//                val w = size.width
+//                val h = size.height
+//                if (w <= 0f || h <= 0f) return@Canvas
+//
+//                val insetPx = with(density) { 5.dp.toPx() }
+//                val lineLen = with(density) { 18.dp.toPx() }
+//                val strokeW = with(density) { 3.dp.toPx() }
+//                val binPx = with(density) { 14.dp.toPx() }.coerceAtLeast(6f)
+//
+//                val left = insetPx
+//                val right = w - insetPx
+//                val top = insetPx
+//                val bottom = h - insetPx
+//
+//                val cx = w / 2f
+//                val cy = h / 2f
+//
+//                val proj = map.projection
+//                val seen = HashSet<String>()
+//                val yellow = ComposeColor(0xFFFFEB3B)
+//
+//                clusters.forEach { cluster ->
+//                    val pt = proj.toScreenLocation(cluster.position)
+//                    val x = pt.x.toFloat()
+//                    val y = pt.y.toFloat()
+//
+//                    val inside = x in left..right && y in top..bottom
+//                    if (inside) return@forEach
+//
+//                    val dx = x - cx
+//                    val dy = y - cy
+//                    if (dx == 0f && dy == 0f) return@forEach
+//
+//                    // Intersect ray from center -> point with the inset rectangle.
+//                    var t = Float.POSITIVE_INFINITY
+//                    if (dx > 0f) t = min(t, (right - cx) / dx)
+//                    if (dx < 0f) t = min(t, (left - cx) / dx)
+//                    if (dy > 0f) t = min(t, (bottom - cy) / dy)
+//                    if (dy < 0f) t = min(t, (top - cy) / dy)
+//                    if (!t.isFinite() || t <= 0f) return@forEach
+//
+//                    val ix = (cx + dx * t).coerceIn(left, right)
+//                    val iy = (cy + dy * t).coerceIn(top, bottom)
+//
+//                    val edge = when {
+//                        abs(ix - left) < 1.5f -> "L"
+//                        abs(ix - right) < 1.5f -> "R"
+//                        abs(iy - top) < 1.5f -> "T"
+//                        abs(iy - bottom) < 1.5f -> "B"
+//                        else -> {
+//                            // Fallback: pick nearest edge.
+//                            val dl = abs(ix - left)
+//                            val dr = abs(ix - right)
+//                            val dt = abs(iy - top)
+//                            val db = abs(iy - bottom)
+//                            val m = min(min(dl, dr), min(dt, db))
+//                            when (m) {
+//                                dl -> "L"
+//                                dr -> "R"
+//                                dt -> "T"
+//                                else -> "B"
+//                            }
+//                        }
+//                    }
+//
+//                    val key = when (edge) {
+//                        "L", "R" -> "$edge:${(iy / binPx).toInt()}"
+//                        else -> "$edge:${(ix / binPx).toInt()}"
+//                    }
+//                    if (!seen.add(key)) return@forEach
+//
+//                    when (edge) {
+//                        "L", "R" -> {
+//                            val xEdge = if (edge == "L") left else right
+//                            val y0 = (iy - lineLen / 2f).coerceIn(top, bottom)
+//                            val y1 = (iy + lineLen / 2f).coerceIn(top, bottom)
+//                            drawLine(
+//                                color = yellow,
+//                                start = Offset(xEdge, y0),
+//                                end = Offset(xEdge, y1),
+//                                strokeWidth = strokeW,
+//                                cap = StrokeCap.Round
+//                            )
+//                        }
+//                        "T", "B" -> {
+//                            val yEdge = if (edge == "T") top else bottom
+//                            val x0 = (ix - lineLen / 2f).coerceIn(left, right)
+//                            val x1 = (ix + lineLen / 2f).coerceIn(left, right)
+//                            drawLine(
+//                                color = yellow,
+//                                start = Offset(x0, yEdge),
+//                                end = Offset(x1, yEdge),
+//                                strokeWidth = strokeW,
+//                                cap = StrokeCap.Round
+//                            )
+//                        }
+//                    }
+//                }
+//            }
+            TimeGradientLegend(
+                startDate = firstDate,
+                endDate = lastDate,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+            )
+        }
+
+        if (missingImagesCount > 0) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "$missingImagesCount images missing information",
+                modifier = Modifier
+                    .padding(horizontal = 16.dp)
+                    .clickable { showMissingInfoDialog = true },
+                color = ComposeColor(0xFF1976D2)
+            )
+        }
+
+        if (showMissingInfoDialog) {
+            AlertDialog(
+                onDismissRequest = { showMissingInfoDialog = false },
+                title = {
+                    Text(text = "Missing information")
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .height(300.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        missingInfoEntries.forEach { entry ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                val thumbBitmap by produceState<Bitmap?>(initialValue = null, entry.photo) {
+                                    value = loadPhotoBitmap(context, entry.photo)
+                                }
+                                if (thumbBitmap != null) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = thumbBitmap!!.asImageBitmap(),
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .clickable {
+                                                showMissingInfoDialog = false
+                                                onPhotoClick(entry.photo.id)
+                                            }
                                     )
                                 }
+                                Spacer(modifier = Modifier.size(8.dp))
+                                Text(text = entry.description)
                             }
-
-                            true
-                        }
-                    )
-                }
-            }
-        }
-
-        // Yellow off-screen indicators for clusters/photos outside the viewport.
-        // Each tick is drawn on the edge pointing toward the off-screen cluster.
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val map = mapRef ?: return@Canvas
-            val w = mapSizePx.width.toFloat()
-            val h = mapSizePx.height.toFloat()
-            if (w <= 0f || h <= 0f) return@Canvas
-
-            val insetPx = with(density) { 5.dp.toPx() }
-            val lineLen = with(density) { 18.dp.toPx() }
-            val strokeW = with(density) { 3.dp.toPx() }
-            val binPx = with(density) { 14.dp.toPx() }.coerceAtLeast(6f)
-
-            val left = insetPx
-            val right = w - insetPx
-            val top = insetPx
-            val bottom = h - insetPx
-
-            val cx = w / 2f
-            val cy = h / 2f
-
-            val proj = map.projection
-            val seen = HashSet<String>()
-            val yellow = ComposeColor(0xFFFFEB3B)
-
-            clusters.forEach { cluster ->
-                val pt = proj.toScreenLocation(cluster.position)
-                val x = pt.x.toFloat()
-                val y = pt.y.toFloat()
-
-                val inside = x in left..right && y in top..bottom
-                if (inside) return@forEach
-
-                val dx = x - cx
-                val dy = y - cy
-                if (dx == 0f && dy == 0f) return@forEach
-
-                // Intersect ray from center -> point with the inset rectangle.
-                var t = Float.POSITIVE_INFINITY
-                if (dx > 0f) t = min(t, (right - cx) / dx)
-                if (dx < 0f) t = min(t, (left - cx) / dx)
-                if (dy > 0f) t = min(t, (bottom - cy) / dy)
-                if (dy < 0f) t = min(t, (top - cy) / dy)
-                if (!t.isFinite() || t <= 0f) return@forEach
-
-                val ix = (cx + dx * t).coerceIn(left, right)
-                val iy = (cy + dy * t).coerceIn(top, bottom)
-
-                val edge = when {
-                    abs(ix - left) < 1.5f -> "L"
-                    abs(ix - right) < 1.5f -> "R"
-                    abs(iy - top) < 1.5f -> "T"
-                    abs(iy - bottom) < 1.5f -> "B"
-                    else -> {
-                        // Fallback: pick nearest edge.
-                        val dl = abs(ix - left)
-                        val dr = abs(ix - right)
-                        val dt = abs(iy - top)
-                        val db = abs(iy - bottom)
-                        val m = min(min(dl, dr), min(dt, db))
-                        when (m) {
-                            dl -> "L"
-                            dr -> "R"
-                            dt -> "T"
-                            else -> "B"
                         }
                     }
-                }
-
-                val key = when (edge) {
-                    "L", "R" -> "$edge:${(iy / binPx).toInt()}"
-                    else -> "$edge:${(ix / binPx).toInt()}"
-                }
-                if (!seen.add(key)) return@forEach
-
-                when (edge) {
-                    "L", "R" -> {
-                        val xEdge = if (edge == "L") left else right
-                        val y0 = (iy - lineLen / 2f).coerceIn(top, bottom)
-                        val y1 = (iy + lineLen / 2f).coerceIn(top, bottom)
-                        drawLine(
-                            color = yellow,
-                            start = Offset(xEdge, y0),
-                            end = Offset(xEdge, y1),
-                            strokeWidth = strokeW,
-                            cap = StrokeCap.Round
-                        )
-                    }
-                    "T", "B" -> {
-                        val yEdge = if (edge == "T") top else bottom
-                        val x0 = (ix - lineLen / 2f).coerceIn(left, right)
-                        val x1 = (ix + lineLen / 2f).coerceIn(left, right)
-                        drawLine(
-                            color = yellow,
-                            start = Offset(x0, yEdge),
-                            end = Offset(x1, yEdge),
-                            strokeWidth = strokeW,
-                            cap = StrokeCap.Round
-                        )
+                },
+                confirmButton = {
+                    Button(onClick = { showMissingInfoDialog = false }) {
+                        Text("Close")
                     }
                 }
-            }
+            )
         }
-        TimeGradientLegend(
-            startDate = firstDate,
-            endDate = lastDate,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-        )
     }
 }
