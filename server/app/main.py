@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
 from app.config.db import SessionLocal
 from app.config.firebase import initialize_firebase
-from app.routers import health, auth, albums, images, audio, upload, location, users, friends, notifications
+from app.routers import health, auth, albums, images, audio, upload, location, users, friends, notifications, album_suggestions
 from app.services.notification_service import run_daily_anniversary_job
 
 logging.basicConfig(
@@ -80,6 +80,7 @@ def custom_openapi():
             "/audio",
             "/upload",
             "/notifications",
+            "/album-suggestions",
         ]
 
         for path, methods in openapi_schema["paths"].items():
@@ -124,6 +125,7 @@ app.include_router(location.router)
 app.include_router(users.router)
 app.include_router(friends.router)
 app.include_router(notifications.router)
+app.include_router(album_suggestions.router)
 
 
 @app.get("/")

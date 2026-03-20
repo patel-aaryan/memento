@@ -64,6 +64,7 @@ import com.example.mementoandroid.ui.home.HomeAddAction
 import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
 import com.example.mementoandroid.ui.home.HomePhotoMetadata
 import com.example.mementoandroid.ui.home.HomeScreen
+import com.example.mementoandroid.ui.home.SuggestedAlbumUi
 import com.example.mementoandroid.ui.massupload.SelectedImage
 import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AlbumSortStore
@@ -185,6 +186,9 @@ class MainActivity : ComponentActivity() {
                 var newAlbumName by rememberSaveable { mutableStateOf("") }
                 var isCreatingAlbum by remember { mutableStateOf(false) }
 
+                var albumSuggestion by remember { mutableStateOf<SuggestedAlbumUi?>(null) }
+                var albumSuggestionBusy by remember { mutableStateOf(false) }
+
                 var showFriendPicker by remember { mutableStateOf(false) }
                 var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
                 var albumShowMap by rememberSaveable { mutableStateOf(false) }
@@ -192,6 +196,39 @@ class MainActivity : ComponentActivity() {
                 var albumSort by remember { mutableStateOf(AlbumSort(AlbumSortKind.TIME_NEWEST_FIRST)) }
 
                 val scope = rememberCoroutineScope()
+
+                fun loadAlbumSuggestion() {
+                    scope.launch {
+                        val t = AuthTokenStore.get() ?: return@launch
+                        withContext(Dispatchers.IO) {
+                            BackendClient.get("/album-suggestions/current", t)
+                                .onSuccess { j ->
+                                    val sugObj = j.optJSONObject("suggestion")
+                                    val ui = if (sugObj != null && sugObj.has("id")) {
+                                        val arr = sugObj.optJSONArray("preview_image_urls")
+                                        val previews = mutableListOf<String>()
+                                        if (arr != null) {
+                                            for (i in 0 until arr.length()) {
+                                                previews.add(arr.getString(i))
+                                            }
+                                        }
+                                        SuggestedAlbumUi(
+                                            id = sugObj.getInt("id"),
+                                            albumName = sugObj.optString("album_name", ""),
+                                            previewUrls = previews,
+                                            imageCount = sugObj.optInt("image_count", 0),
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                    withContext(Dispatchers.Main) { albumSuggestion = ui }
+                                }
+                                .onFailure {
+                                    withContext(Dispatchers.Main) { albumSuggestion = null }
+                                }
+                        }
+                    }
+                }
 
                 val profileLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.StartActivityForResult()
@@ -264,12 +301,14 @@ class MainActivity : ComponentActivity() {
                                             standalonePhotos = photoList
                                             myPhotosAlbumId = myPhotos.id
                                         }
+                                        loadAlbumSuggestion()
                                     }
                             } else {
                                 withContext(Dispatchers.Main) {
                                     standalonePhotos = emptyList()
                                     myPhotosAlbumId = null
                                 }
+                                loadAlbumSuggestion()
                             }
                         }
                         .onFailure { handle401(context, it) }
@@ -289,6 +328,7 @@ class MainActivity : ComponentActivity() {
                             albumMembers = emptyList()
                             photos.clear()
                         }
+                        loadAlbumSuggestion()
                         return@LaunchedEffect
                     }
                     val t = AuthTokenStore.get() ?: return@LaunchedEffect
@@ -421,12 +461,14 @@ class MainActivity : ComponentActivity() {
                                                     standalonePhotos = photoList
                                                     myPhotosAlbumId = myPhotos.id
                                                 }
+                                                loadAlbumSuggestion()
                                             }
                                     } else {
                                         withContext(Dispatchers.Main) {
                                             standalonePhotos = emptyList()
                                             myPhotosAlbumId = null
                                         }
+                                        loadAlbumSuggestion()
                                     }
                                 }
                         }
@@ -1314,6 +1356,79 @@ class MainActivity : ComponentActivity() {
                                 standalonePhotos = standalonePhotos,
                                 myPhotosAlbumId = myPhotosAlbumId,
                                 profilePictureUrl = currentUserProfilePictureUrl,
+                                albumSuggestion = albumSuggestion,
+                                albumSuggestionBusy = albumSuggestionBusy,
+                                onAcceptAlbumSuggestion = acceptSuggestion@{
+                                    val sid = albumSuggestion?.id ?: return@acceptSuggestion
+                                    scope.launch {
+                                        val t = AuthTokenStore.get() ?: return@launch
+                                        albumSuggestionBusy = true
+                                        withContext(Dispatchers.IO) {
+                                            BackendClient.post(
+                                                "/album-suggestions/$sid/accept",
+                                                body = null,
+                                                token = t,
+                                            )
+                                                .onSuccess { j ->
+                                                    val newAlbumId = j.getInt("album_id")
+                                                    withContext(Dispatchers.Main) {
+                                                        albumSuggestionBusy = false
+                                                        albumSuggestion = null
+                                                        photoDetailFromStandalone = false
+                                                        selectedAlbumId = newAlbumId
+                                                        refreshHomeData()
+                                                    }
+                                                }
+                                                .onFailure { e ->
+                                                    withContext(Dispatchers.Main) {
+                                                        albumSuggestionBusy = false
+                                                        handle401(context, e)
+                                                        Toast.makeText(
+                                                            context,
+                                                            (e as? BackendException)?.message
+                                                                ?: e.message
+                                                                ?: "Could not create album",
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                    }
+                                                }
+                                        }
+                                    }
+                                },
+                                onRejectAlbumSuggestion = rejectSuggestion@{
+                                    val sid = albumSuggestion?.id ?: return@rejectSuggestion
+                                    scope.launch {
+                                        val t = AuthTokenStore.get() ?: return@launch
+                                        albumSuggestionBusy = true
+                                        withContext(Dispatchers.IO) {
+                                            BackendClient.post(
+                                                "/album-suggestions/$sid/reject",
+                                                body = null,
+                                                token = t,
+                                            )
+                                                .onSuccess {
+                                                    withContext(Dispatchers.Main) {
+                                                        albumSuggestionBusy = false
+                                                        albumSuggestion = null
+                                                    }
+                                                    loadAlbumSuggestion()
+                                                }
+                                                .onFailure { e ->
+                                                    withContext(Dispatchers.Main) {
+                                                        albumSuggestionBusy = false
+                                                        handle401(context, e)
+                                                        Toast.makeText(
+                                                            context,
+                                                            (e as? BackendException)?.message
+                                                                ?: e.message
+                                                                ?: "Could not dismiss",
+                                                            Toast.LENGTH_SHORT,
+                                                        ).show()
+                                                    }
+                                                }
+                                        }
+                                    }
+                                },
                                 onProfileClick = { profileLauncher.launch(Intent(context, ProfileActivity::class.java)) },
                                 onAlbumClick = {
                                     selectedAlbumId = it

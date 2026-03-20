@@ -89,6 +89,10 @@ fun HomeScreen(
     myPhotosAlbumId: Int? = null,
     modifier: Modifier = Modifier,
     profilePictureUrl: String? = null,
+    albumSuggestion: SuggestedAlbumUi? = null,
+    albumSuggestionBusy: Boolean = false,
+    onAcceptAlbumSuggestion: () -> Unit = {},
+    onRejectAlbumSuggestion: () -> Unit = {},
     onProfileClick: () -> Unit,
     onAlbumClick: (Int) -> Unit = {},
     onStandalonePhotoClick: (AlbumPhotoUi) -> Unit = {},
@@ -202,6 +206,16 @@ fun HomeScreen(
                 onFilterChange = { homeFilter = it },
                 modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 2.dp)
             )
+
+            if (albumSuggestion != null) {
+                AlbumSuggestionBanner(
+                    suggestion = albumSuggestion,
+                    busy = albumSuggestionBusy,
+                    onAccept = onAcceptAlbumSuggestion,
+                    onReject = onRejectAlbumSuggestion,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
 
             if (showTileView) {
                 LazyVerticalGrid(

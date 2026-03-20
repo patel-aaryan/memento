@@ -1,6 +1,6 @@
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Sequence
 
 
 def create_image(
@@ -144,6 +144,47 @@ def delete_image(db: Session, image_id: int) -> bool:
     except Exception as e:
         db.rollback()
         raise e
+
+
+def bulk_move_images_to_album(
+    db: Session,
+    image_ids: Sequence[int],
+    new_album_id: int,
+    user_id: int,
+    from_album_id: int,
+) -> int:
+    """Move images to another album if they belong to user and from_album_id. Returns rows updated."""
+    ids = [int(x) for x in image_ids]
+    if not ids:
+        return 0
+    placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
+    params: dict = {
+        "new_album_id": new_album_id,
+        "user_id": user_id,
+        "from_album_id": from_album_id,
+    }
+    for i, v in enumerate(ids):
+        params[f"id_{i}"] = v
+    query = text(f"""
+        UPDATE images
+        SET album_id = :new_album_id, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN ({placeholders})
+          AND user_id = :user_id
+          AND album_id = :from_album_id
+    """)
+    try:
+        result = db.execute(query, params)
+        db.commit()
+        return result.rowcount or 0
+    except Exception as e:
+        db.rollback()
+        raise e
+
+
+def count_images_in_album(db: Session, album_id: int) -> int:
+    q = text("SELECT COUNT(*) FROM images WHERE album_id = :album_id")
+    row = db.execute(q, {"album_id": album_id}).fetchone()
+    return int(row[0]) if row else 0
 
 
 def get_album_images(db: Session, album_id: int) -> List[dict]:

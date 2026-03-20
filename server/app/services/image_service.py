@@ -82,7 +82,20 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
             album_id,
             e,
         )
-    
+
+    try:
+        album = album_repository.get_album_by_id(db, album_id)
+        if album and album["name"] == album_service.PERSONAL_ALBUM_NAME:
+            from app.services import album_suggestion_service
+
+            album_suggestion_service.bump_suggestion_stale(db, album["owner_id"])
+    except Exception as e:
+        logger.warning(
+            "Failed to bump album suggestion stale for user_id=%s: %s",
+            user_id,
+            e,
+        )
+
     return ImageResponse(**image)
 
 
@@ -181,6 +194,18 @@ def delete_image(db: Session, image_id: int, user_id: int) -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete image"
+        )
+
+    try:
+        if album["name"] == album_service.PERSONAL_ALBUM_NAME:
+            from app.services import album_suggestion_service
+
+            album_suggestion_service.bump_suggestion_stale(db, album["owner_id"])
+    except Exception as e:
+        logger.warning(
+            "Failed to bump album suggestion stale after delete user_id=%s: %s",
+            user_id,
+            e,
         )
 
 

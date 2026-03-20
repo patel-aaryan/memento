@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # Timezone for anniversary "today" (e.g. America/New_York, UTC)
     anniversary_timezone: str = "America/New_York"
 
+    # OpenAI: album suggestions from "My Photos" (optional; worker skips if empty)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    # Minimum seconds between OpenAI calls for the same user (poll + worker + uploads share this)
+    album_suggestion_openai_cooldown_seconds: int = 0
+
     class Config:
         env_file = ".env"
 
