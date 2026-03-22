@@ -12,13 +12,14 @@ def create_image(
     audio_url: Optional[str] = None,
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
-    taken_at: Optional[str] = None
+    taken_at: Optional[str] = None,
+    location_name: Optional[str] = None,
 ) -> Optional[dict]:
     """Create a new image. taken_at is ISO datetime from photo EXIF (when the photo was taken)."""
     query = text("""
-        INSERT INTO images (album_id, caption, image_url, audio_url, latitude, longitude, user_id, taken_at)
-        VALUES (:album_id, :caption, :image_url, :audio_url, :latitude, :longitude, :user_id, CAST(:taken_at AS TIMESTAMPTZ))
-        RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
+        INSERT INTO images (album_id, caption, image_url, audio_url, latitude, longitude, user_id, taken_at, location_name)
+        VALUES (:album_id, :caption, :image_url, :audio_url, :latitude, :longitude, :user_id, CAST(:taken_at AS TIMESTAMPTZ), :location_name)
+        RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, location_name, created_at, updated_at
     """)
 
     try:
@@ -30,7 +31,8 @@ def create_image(
             "latitude": latitude,
             "longitude": longitude,
             "user_id": user_id,
-            "taken_at": taken_at
+            "taken_at": taken_at,
+            "location_name": location_name,
         })
         db.commit()
         row = result.fetchone()
@@ -44,7 +46,8 @@ def create_image(
 
 
 def _row_to_image_dict(row) -> dict:
-    """Map DB row (id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at) to dict."""
+    """Map DB row (id, album_id, caption, image_url, audio_url, latitude, longitude,
+    date_added, taken_at, user_id, location_name, created_at, updated_at) to dict."""
     return {
         "id": row[0],
         "album_id": row[1],
@@ -56,15 +59,17 @@ def _row_to_image_dict(row) -> dict:
         "date_added": str(row[7]),
         "taken_at": str(row[8]) if row[8] is not None else None,
         "user_id": row[9],
-        "created_at": str(row[10]),
-        "updated_at": str(row[11])
+        "location_name": row[10],
+        "created_at": str(row[11]),
+        "updated_at": str(row[12])
     }
 
 
 def get_image_by_id(db: Session, image_id: int) -> Optional[dict]:
     """Get an image by ID."""
     query = text("""
-        SELECT id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
+        SELECT id, album_id, caption, image_url, audio_url, latitude, longitude,
+               date_added, taken_at, user_id, location_name, created_at, updated_at
         FROM images
         WHERE id = :image_id
     """)
@@ -77,8 +82,15 @@ def get_image_by_id(db: Session, image_id: int) -> Optional[dict]:
     return None
 
 
-_UPDATEABLE_IMAGE_KEYS = ("caption", "image_url",
-                          "audio_url", "latitude", "longitude", "taken_at")
+_UPDATEABLE_IMAGE_KEYS = (
+    "caption",
+    "image_url",
+    "audio_url",
+    "latitude",
+    "longitude",
+    "taken_at",
+    "location_name",
+)
 
 
 def update_image(
@@ -111,7 +123,8 @@ def update_image(
         UPDATE images
         SET {', '.join(set_clauses)}
         WHERE id = :image_id
-        RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
+        RETURNING id, album_id, caption, image_url, audio_url, latitude, longitude,
+                  date_added, taken_at, user_id, location_name, created_at, updated_at
     """)
 
     try:
@@ -190,7 +203,8 @@ def count_images_in_album(db: Session, album_id: int) -> int:
 def get_album_images(db: Session, album_id: int) -> List[dict]:
     """Get all images in an album."""
     query = text("""
-        SELECT id, album_id, caption, image_url, audio_url, latitude, longitude, date_added, taken_at, user_id, created_at, updated_at
+        SELECT id, album_id, caption, image_url, audio_url, latitude, longitude,
+               date_added, taken_at, user_id, location_name, created_at, updated_at
         FROM images
         WHERE album_id = :album_id
         ORDER BY date_added DESC
@@ -224,7 +238,7 @@ def get_user_images_with_location_on_date(
     """
     query = text("""
         SELECT id, album_id, caption, image_url, audio_url, latitude, longitude,
-               date_added, taken_at, user_id, created_at, updated_at
+               date_added, taken_at, user_id, location_name, created_at, updated_at
         FROM images
         WHERE user_id = :user_id
           AND latitude IS NOT NULL

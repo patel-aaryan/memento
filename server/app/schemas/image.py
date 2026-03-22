@@ -11,6 +11,7 @@ class ImageCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
+    location_name: Optional[str] = None  # Human-readable place name (cached on upload)
 
 
 class ImageUpdate(BaseModel):
@@ -20,6 +21,7 @@ class ImageUpdate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     taken_at: Optional[str] = None  # ISO datetime when photo was taken (from EXIF)
+    location_name: Optional[str] = None  # Allow user to modify cached place name
 
 
 class ImageResponse(BaseModel):
@@ -30,6 +32,7 @@ class ImageResponse(BaseModel):
     audio_url: Optional[str] = None  # Cloudinary URL for voice note
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    location_name: Optional[str] = None  # Cached human-readable place name (if available)
     date_added: str
     taken_at: Optional[str] = None  # When photo was taken (from metadata), if set
     user_id: int

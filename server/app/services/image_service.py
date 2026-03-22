@@ -6,6 +6,7 @@ from app.repositories import image_repository, album_repository, album_member_re
 from app.repositories.user_repository import get_user_by_id
 from app.schemas.image import ImageCreate, ImageUpdate, ImageResponse
 from app.services import album_service, notification_service
+from app.services.location_service import resolve_location_label_for_coordinates
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,25 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
                 detail="You don't have access to this album"
             )
     
+    # Derive a human-readable location name once on upload, if possible.
+    # Priority:
+    # 1) Use location_name provided by the client (e.g. from place-details)
+    # 2) If not provided but we have coordinates, call Places Nearby once.
+    location_name = image_data.location_name
+    if location_name is None and image_data.latitude is not None and image_data.longitude is not None:
+        try:
+            location_name = resolve_location_label_for_coordinates(
+                float(image_data.latitude),
+                float(image_data.longitude),
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve location_name for new image (lat=%s, lng=%s): %s",
+                image_data.latitude,
+                image_data.longitude,
+                e,
+            )
+
     # Create the image (taken_at = when photo was taken from EXIF, if provided)
     image = image_repository.create_image(
         db=db,
@@ -41,7 +61,8 @@ def create_image(db: Session, image_data: ImageCreate, user_id: int) -> ImageRes
         audio_url=image_data.audio_url,
         latitude=image_data.latitude,
         longitude=image_data.longitude,
-        taken_at=image_data.taken_at
+        taken_at=image_data.taken_at,
+        location_name=location_name,
     )
     
     if not image:
@@ -149,6 +170,27 @@ def update_image(db: Session, image_id: int, image_data: ImageUpdate, user_id: i
     update_kwargs = image_data.model_dump(exclude_unset=True)
     if not update_kwargs:
         return ImageResponse(**image)
+
+    # If the client explicitly sends a new location_name, trust it and do not
+    # call the external API again. Otherwise, if coordinates are being changed
+    # (or provided for the first time), resolve a fresh location_name once.
+    if "location_name" not in update_kwargs:
+        lat = update_kwargs.get("latitude", image.get("latitude"))
+        lng = update_kwargs.get("longitude", image.get("longitude"))
+        if lat is not None and lng is not None and (
+            "latitude" in update_kwargs or "longitude" in update_kwargs
+        ):
+            try:
+                resolved_name = resolve_location_label_for_coordinates(float(lat), float(lng))
+                update_kwargs["location_name"] = resolved_name
+            except Exception as e:
+                logger.warning(
+                    "Failed to resolve location_name for updated image_id=%s (lat=%s, lng=%s): %s",
+                    image_id,
+                    lat,
+                    lng,
+                    e,
+                )
     
     print(f"[image_service] update_image id={image_id} update_kwargs={update_kwargs}", flush=True)
     # Update the image (pass dict so we can set optional fields to None, e.g. clear audio_url)

@@ -68,6 +68,7 @@ import com.example.mementoandroid.util.instantToLocalDateMillis
 import com.example.mementoandroid.util.parseIsoToHourMinute
 import com.example.mementoandroid.util.parseIsoToMillis
 import com.example.mementoandroid.util.recordAudioToCache
+import com.example.mementoandroid.util.DeviceLocationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -128,6 +129,11 @@ fun HomePhotoEntryScreen(
     var locationSuggestions by remember(metadata.imageUri) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var editedLatitude by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
     var editedLongitude by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
+    /** True when user chose a place from search; send that label as location_name on save. */
+    var locationPickedFromSearch by remember(metadata.imageUri) { mutableStateOf(false) }
+    /** Device GPS when EXIF had no location (same coords used for resolve-label + upload). */
+    var deviceFallbackLat by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
+    var deviceFallbackLng by remember(metadata.imageUri) { mutableStateOf<Double?>(null) }
     var editedTakenAt by remember(metadata.imageUri) { mutableStateOf("") }
     var showDatePickerDialog by remember(metadata.imageUri) { mutableStateOf(false) }
     var showTimePickerDialog by remember(metadata.imageUri) { mutableStateOf(false) }
@@ -176,28 +182,41 @@ fun HomePhotoEntryScreen(
         }
     }
 
-    // Initial display: from metadata; also try to resolve a human-readable
-    // location from the backend using coordinates (with city fallback).
-    LaunchedEffect(metadata.latitude, metadata.longitude, metadata.takenAt) {
-        val lat = metadata.latitude
-        val lng = metadata.longitude
+    // 1) EXIF coords from metadata, else phone last-known location (if permitted).
+    // 2) One backend call: specific place/POI when possible, else city (same logic as DB on save).
+    LaunchedEffect(metadata.latitude, metadata.longitude, metadata.imageUri, metadata.takenAt) {
+        deviceFallbackLat = null
+        deviceFallbackLng = null
+        var lat = metadata.latitude
+        var lng = metadata.longitude
+        if (lat == null || lng == null) {
+            val loc = withContext(Dispatchers.IO) { DeviceLocationHelper.getLastKnownOrNull(context) }
+            if (loc != null) {
+                lat = loc.latitude
+                lng = loc.longitude
+                withContext(Dispatchers.Main) {
+                    deviceFallbackLat = lat
+                    deviceFallbackLng = lng
+                }
+            }
+        }
         if (lat != null && lng != null) {
             withContext(Dispatchers.Main) {
                 displayedLocation = formatPhotoMetadataLocation(lat, lng)
             }
-            // Try to resolve an automatic city/place name from coordinates.
             val result = BackendClient.get(
-                path = "/location/reverse-geocode?lat=$lat&lng=$lng"
+                path = "/location/resolve-label?lat=$lat&lng=$lng&radius_m=150"
             )
             result.onSuccess { json ->
-                val city = json.optString("city", "")
-                if (city.isNotBlank()) {
+                if (json.isNull("location_name")) return@onSuccess
+                val label = json.optString("location_name", "")
+                if (label.isNotBlank()) {
                     withContext(Dispatchers.Main) {
-                        displayedLocation = city
+                        displayedLocation = label
                     }
                 }
             }.onFailure { e ->
-                Log.w("HomePhotoEntryScreen", "Failed to reverse-geocode city", e)
+                Log.w("HomePhotoEntryScreen", "Failed to resolve location label", e)
             }
         } else {
             withContext(Dispatchers.Main) {
@@ -270,8 +289,15 @@ fun HomePhotoEntryScreen(
 
     suspend fun uploadAndSave() {
         val token = AuthTokenStore.get() ?: return
-        val lat = editedLatitude ?: metadata.latitude
-        val lng = editedLongitude ?: metadata.longitude
+        var lat = editedLatitude ?: metadata.latitude ?: deviceFallbackLat
+        var lng = editedLongitude ?: metadata.longitude ?: deviceFallbackLng
+        if (lat == null || lng == null) {
+            val loc = withContext(Dispatchers.IO) { DeviceLocationHelper.getLastKnownOrNull(context) }
+            if (loc != null) {
+                lat = loc.latitude
+                lng = loc.longitude
+            }
+        }
         val takenAt = editedTakenAt.takeIf { it.isNotBlank() } ?: metadata.takenAt
 
         val imageUrl = withContext(Dispatchers.IO) {
@@ -302,11 +328,10 @@ fun HomePhotoEntryScreen(
             lng?.let { put("longitude", it) }
             takenAt?.let { put("taken_at", it) }
             audioUrl?.let { put("audio_url", it) }
-            // Send the resolved place name so the backend can persist it
-            displayedLocation?.let { name ->
-                if (name.isNotBlank()) {
-                    put("location_name", name)
-                }
+            // Default: omit location_name so server resolves from lat/lng (place + city fallback).
+            // If user picked a place from search, send that exact name.
+            if (locationPickedFromSearch) {
+                displayedLocation?.takeIf { it.isNotBlank() }?.let { put("location_name", it) }
             }
         }
         Log.d("HomePhotoEntryScreen", "POST /images body: ${body.toString()}")
@@ -474,6 +499,7 @@ fun HomePhotoEntryScreen(
                                                             editedLongitude = lng
                                                             displayedLocation = name
                                                             editedLocationText = name
+                                                            locationPickedFromSearch = true
                                                             locationSuggestions = emptyList()
                                                             isEditingLocation = false
                                                         }

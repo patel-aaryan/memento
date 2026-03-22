@@ -15,6 +15,8 @@ from app.services.location_service import (
     nearest_place_display_name,
     autocomplete_places,
     get_place_details,
+    reverse_geocode_city,
+    resolve_location_label_for_coordinates,
 )
 
 
@@ -73,6 +75,52 @@ async def get_nearest_place(
 
     # If no place is found, return a 200 with null to keep the client logic simple
     return {"place_name": place_name}
+
+
+@router.get("/resolve-label")
+async def resolve_location_label(
+    lat: float = Query(..., description="Latitude in decimal degrees"),
+    lng: float = Query(..., description="Longitude in decimal degrees"),
+    radius_m: int = Query(150, ge=50, le=50_000, description="Nearby search radius in meters"),
+):
+    """
+    Single call for clients: nearest POI/place name if available, else city from geocoding.
+    Same logic used when saving an image (place → city).
+    """
+    logger.info(
+        "GET /location/resolve-label (lat=%s, lng=%s, radius_m=%s)",
+        lat,
+        lng,
+        radius_m,
+    )
+    try:
+        label = resolve_location_label_for_coordinates(lat, lng, radius_m=radius_m)
+    except RuntimeError as exc:
+        logger.error("resolve-label failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"location_name": label}
+
+
+@router.get("/reverse-geocode")
+async def reverse_geocode(
+    lat: float = Query(..., description="Latitude in decimal degrees"),
+    lng: float = Query(..., description="Longitude in decimal degrees"),
+):
+    """
+    Return a best-effort city name for the given coordinates using Google Geocoding API.
+    Intended as a fallback when Nearby search cannot find a specific place name.
+    """
+    logger.info(
+        "GET /location/reverse-geocode called (lat=%s, lng=%s)",
+        lat,
+        lng,
+    )
+    try:
+        city = reverse_geocode_city(lat, lng)
+    except RuntimeError as exc:
+        logger.error("Reverse geocode failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"city": city}
 
 
 @router.get("/autocomplete")

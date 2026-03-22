@@ -78,12 +78,10 @@ import com.example.mementoandroid.util.extractPhotoMetadata
 import com.example.mementoandroid.util.logPhotoMetadata
 import com.example.mementoandroid.util.sharePhotos
 import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
+import com.example.mementoandroid.util.DeviceLocationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.google.android.gms.location.LocationServices
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
 import org.json.JSONObject
 import java.io.File
 
@@ -201,30 +199,8 @@ class MainActivity : ComponentActivity() {
                 var albumSort by remember { mutableStateOf(AlbumSort(AlbumSortKind.TIME_NEWEST_FIRST)) }
 
                 val scope = rememberCoroutineScope()
-                suspend fun getCurrentLocationOrNull(): android.location.Location? {
-                    val hasFine = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_FINE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    val hasCoarse = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (!hasFine && !hasCoarse) {
-                        Log.w(TAG, "No location permission granted; cannot attach current location to photo")
-                        return null
-                    }
-                    val client = LocationServices.getFusedLocationProviderClient(context)
-                    return suspendCancellableCoroutine { cont ->
-                        client.lastLocation
-                            .addOnSuccessListener { loc ->
-                                if (!cont.isCompleted) cont.resume(loc)
-                            }
-                            .addOnFailureListener {
-                                if (!cont.isCompleted) cont.resume(null)
-                            }
-                    }
-                }
+                suspend fun getCurrentLocationOrNull(): android.location.Location? =
+                    DeviceLocationHelper.getLastKnownOrNull(context)
 
 
                 fun loadAlbumSuggestion() {

@@ -6,6 +6,7 @@ from app.config.db import get_db
 from app.dependencies.auth import get_current_user, security
 from app.schemas.image import ImageCreate, ImageUpdate, ImageResponse
 from app.services import image_service
+from app.services.location_service import get_place_details
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/images", tags=["Images"])
@@ -19,6 +20,44 @@ async def create_image(
 ):
     """Create a new image. User must be owner or member of the album."""
     return image_service.create_image(db, image_data, current_user["id"])
+
+
+@router.post("/{image_id}/set-location-from-place", response_model=ImageResponse, dependencies=[Security(security)])
+async def set_image_location_from_place(
+    image_id: int,
+    payload: dict,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Convenience endpoint: given a Google Places place_id, resolve its coordinates
+    and human-readable display_name, then update the image's latitude, longitude,
+    and location_name in a single call.
+    """
+    place_id = payload.get("place_id")
+    if not place_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="place_id is required",
+        )
+
+    try:
+        details = get_place_details(place_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+    lat = details["latitude"]
+    lng = details["longitude"]
+    display_name = details.get("display_name")
+
+    update = ImageUpdate(
+        latitude=lat,
+        longitude=lng,
+        location_name=display_name,
+    )
+    return image_service.update_image(db, image_id, update, current_user["id"])
 
 
 @router.get("/{image_id}", response_model=ImageResponse, dependencies=[Security(security)])
