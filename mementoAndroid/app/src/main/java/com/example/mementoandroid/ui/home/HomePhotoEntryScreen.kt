@@ -176,7 +176,8 @@ fun HomePhotoEntryScreen(
         }
     }
 
-    // Initial display: from metadata, then resolve place name from backend (Google Maps API)
+    // Initial display: from metadata; also try to resolve a human-readable
+    // location from the backend using coordinates (with city fallback).
     LaunchedEffect(metadata.latitude, metadata.longitude, metadata.takenAt) {
         val lat = metadata.latitude
         val lng = metadata.longitude
@@ -184,18 +185,19 @@ fun HomePhotoEntryScreen(
             withContext(Dispatchers.Main) {
                 displayedLocation = formatPhotoMetadataLocation(lat, lng)
             }
+            // Try to resolve an automatic city/place name from coordinates.
             val result = BackendClient.get(
-                path = "/location/nearest-place?lat=$lat&lng=$lng"
+                path = "/location/reverse-geocode?lat=$lat&lng=$lng"
             )
             result.onSuccess { json ->
-                val placeName = json.optString("place_name", "")
-                if (placeName.isNotBlank()) {
+                val city = json.optString("city", "")
+                if (city.isNotBlank()) {
                     withContext(Dispatchers.Main) {
-                        displayedLocation = placeName
+                        displayedLocation = city
                     }
                 }
             }.onFailure { e ->
-                Log.w("HomePhotoEntryScreen", "Failed to fetch place name", e)
+                Log.w("HomePhotoEntryScreen", "Failed to reverse-geocode city", e)
             }
         } else {
             withContext(Dispatchers.Main) {
@@ -300,6 +302,12 @@ fun HomePhotoEntryScreen(
             lng?.let { put("longitude", it) }
             takenAt?.let { put("taken_at", it) }
             audioUrl?.let { put("audio_url", it) }
+            // Send the resolved place name so the backend can persist it
+            displayedLocation?.let { name ->
+                if (name.isNotBlank()) {
+                    put("location_name", name)
+                }
+            }
         }
         Log.d("HomePhotoEntryScreen", "POST /images body: ${body.toString()}")
         val result = BackendClient.post("/images", body, token = token)

@@ -81,6 +81,9 @@ import com.example.mementoandroid.util.verifyAndLogLocationStrippingCause
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.google.android.gms.location.LocationServices
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.json.JSONObject
 import java.io.File
 
@@ -198,6 +201,31 @@ class MainActivity : ComponentActivity() {
                 var albumSort by remember { mutableStateOf(AlbumSort(AlbumSortKind.TIME_NEWEST_FIRST)) }
 
                 val scope = rememberCoroutineScope()
+                suspend fun getCurrentLocationOrNull(): android.location.Location? {
+                    val hasFine = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val hasCoarse = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (!hasFine && !hasCoarse) {
+                        Log.w(TAG, "No location permission granted; cannot attach current location to photo")
+                        return null
+                    }
+                    val client = LocationServices.getFusedLocationProviderClient(context)
+                    return suspendCancellableCoroutine { cont ->
+                        client.lastLocation
+                            .addOnSuccessListener { loc ->
+                                if (!cont.isCompleted) cont.resume(loc)
+                            }
+                            .addOnFailureListener {
+                                if (!cont.isCompleted) cont.resume(null)
+                            }
+                    }
+                }
+
 
                 fun loadAlbumSuggestion() {
                     scope.launch {
@@ -298,6 +326,7 @@ class MainActivity : ComponentActivity() {
                                                 caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                                 latitude = lat,
                                                 longitude = lon,
+                                                locationName = o.optString("location_name", "").takeIf { it.isNotBlank() },
                                                 dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
                                                 takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
                                                 userId = if (o.has("user_id")) o.getInt("user_id") else null
@@ -367,23 +396,24 @@ class MainActivity : ComponentActivity() {
                         withContext(Dispatchers.Main) { albumMembers = list }
                     }.onFailure { withContext(Dispatchers.Main) { albumMembers = emptyList() } }
 
-                    BackendClient.getArray("/images/album/$aid", t).onSuccess { arr ->
-                        val list = (0 until arr.length()).map { i ->
-                            val o = arr.getJSONObject(i)
-                            val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
-                            val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
-                            AlbumPhotoUi(
-                                id = o.getInt("id").toString(),
-                                imageUrl = o.getString("image_url"),
-                                audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
-                                caption = o.optString("caption", "").takeIf { it.isNotBlank() },
-                                latitude = lat,
-                                longitude = lon,
-                                dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
-                                takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
-                                userId = if (o.has("user_id")) o.getInt("user_id") else null
-                            )
-                        }
+                            BackendClient.getArray("/images/album/$aid", t).onSuccess { arr ->
+                                val list = (0 until arr.length()).map { i ->
+                                    val o = arr.getJSONObject(i)
+                                    val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
+                                    val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
+                                    AlbumPhotoUi(
+                                        id = o.getInt("id").toString(),
+                                        imageUrl = o.getString("image_url"),
+                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                        caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                        latitude = lat,
+                                        longitude = lon,
+                                        locationName = o.optString("location_name", "").takeIf { it.isNotBlank() },
+                                        dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                        takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
+                                        userId = if (o.has("user_id")) o.getInt("user_id") else null
+                                    )
+                                }
                         withContext(Dispatchers.Main) {
                             photos.clear()
                             photos.addAll(list)
@@ -414,6 +444,7 @@ class MainActivity : ComponentActivity() {
                                         caption = o.optString("caption", "").takeIf { it.isNotBlank() },
                                         latitude = lat,
                                         longitude = lon,
+                                        locationName = o.optString("location_name", "").takeIf { it.isNotBlank() },
                                         dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
                                         takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
                                         userId = if (o.has("user_id")) o.getInt("user_id") else null
@@ -464,17 +495,18 @@ class MainActivity : ComponentActivity() {
                                                     val o = imgArr.getJSONObject(i)
                                                     val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
                                                     val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
-                                                    AlbumPhotoUi(
-                                                        id = o.getInt("id").toString(),
-                                                        imageUrl = o.getString("image_url"),
-                                                        audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
-                                                        caption = o.optString("caption", "").takeIf { it.isNotBlank() },
-                                                        latitude = lat,
-                                                        longitude = lon,
-                                                        dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
-                                                        takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
-                                                        userId = if (o.has("user_id")) o.getInt("user_id") else null
-                                                    )
+                                            AlbumPhotoUi(
+                                                id = o.getInt("id").toString(),
+                                                imageUrl = o.getString("image_url"),
+                                                audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                                caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                                latitude = lat,
+                                                longitude = lon,
+                                                locationName = o.optString("location_name", "").takeIf { it.isNotBlank() },
+                                                dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                                takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
+                                                userId = if (o.has("user_id")) o.getInt("user_id") else null
+                                            )
                                                 }
                                                 withContext(Dispatchers.Main) {
                                                     standalonePhotos = photoList
@@ -512,11 +544,20 @@ class MainActivity : ComponentActivity() {
                         val metadata = extractPhotoMetadata(context, photo.uri)
                         val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
                             ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                        var lat = metadata?.latitude
+                        var lon = metadata?.longitude
+                        if (lat == null || lon == null) {
+                            val currentLoc = getCurrentLocationOrNull()
+                            if (currentLoc != null) {
+                                lat = currentLoc.latitude
+                                lon = currentLoc.longitude
+                            }
+                        }
 
                         withContext(Dispatchers.Main) {
                             val meta = HomePhotoMetadata(
-                                latitude = metadata?.latitude,
-                                longitude = metadata?.longitude,
+                                latitude = lat,
+                                longitude = lon,
                                 takenAt = takenAt,
                                 imageUri = photo.uri,
                                 imageFile = photo.file
@@ -643,11 +684,20 @@ class MainActivity : ComponentActivity() {
                             if (file.exists()) {
                                 val takenAt = metadata?.dateTimeOriginal?.let { exifDateTimeToIso(it) }
                                     ?: metadata?.dateTaken?.let { exifDateTimeToIso(it) }
+                                var lat = metadata?.latitude
+                                var lon = metadata?.longitude
+                                if (lat == null || lon == null) {
+                                    val currentLoc = getCurrentLocationOrNull()
+                                    if (currentLoc != null) {
+                                        lat = currentLoc.latitude
+                                        lon = currentLoc.longitude
+                                    }
+                                }
 
                                 withContext(Dispatchers.Main) {
                                     val meta = HomePhotoMetadata(
-                                        latitude = metadata?.latitude,
-                                        longitude = metadata?.longitude,
+                                        latitude = lat,
+                                        longitude = lon,
                                         takenAt = takenAt,
                                         imageUri = uri,
                                         imageFile = file

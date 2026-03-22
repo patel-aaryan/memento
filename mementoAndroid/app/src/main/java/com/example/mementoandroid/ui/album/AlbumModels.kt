@@ -11,6 +11,7 @@ data class AlbumPhotoUi(
     val caption: String? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    val locationName: String? = null,
     val dateAdded: String? = null,
     val takenAt: String? = null,
     val userId: Int? = null
