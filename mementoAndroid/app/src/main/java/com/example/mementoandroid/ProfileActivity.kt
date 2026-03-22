@@ -52,6 +52,7 @@ import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -62,6 +63,29 @@ data class UserProfile(
     val email: String,
     val profilePictureUrl: String?
 )
+
+/** Pending friend request where current user is the recipient (can accept or decline). */
+data class IncomingFriendRequest(
+    val id: Int,
+    val requester: UserProfile
+)
+
+private fun parseIncomingFriendRequests(arr: JSONArray): List<IncomingFriendRequest> {
+    return (0 until arr.length()).mapNotNull { i ->
+        val o = arr.optJSONObject(i) ?: return@mapNotNull null
+        val id = o.optInt("id", -1)
+        if (id < 0) return@mapNotNull null
+        val r = o.optJSONObject("requester") ?: return@mapNotNull null
+        IncomingFriendRequest(
+            id = id,
+            requester = UserProfile(
+                name = r.optString("name", ""),
+                email = r.optString("email", ""),
+                profilePictureUrl = r.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+            )
+        )
+    }
+}
 
 private fun handle401(context: ComponentActivity, e: Throwable) {
     if (e is BackendException && e.statusCode == 401) {
@@ -83,6 +107,7 @@ class ProfileActivity : ComponentActivity() {
                 val token = AuthTokenStore.get()
                 var user by remember { mutableStateOf<UserProfile?>(null) }
                 var friends by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+                var incomingFriendRequests by remember { mutableStateOf<List<IncomingFriendRequest>>(emptyList()) }
                 var addPhotoSheetOpen by remember { mutableStateOf(false) }
                 var pendingProfileFile by remember { mutableStateOf<File?>(null) }
                 var pendingProfileUri by remember { mutableStateOf<Uri?>(null) }
@@ -126,6 +151,20 @@ class ProfileActivity : ComponentActivity() {
                     }
                 }
 
+                fun refetchIncomingFriendRequests() {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.getArray("/friends/requests/incoming", t)
+                            .onSuccess { arr ->
+                                val list = parseIncomingFriendRequests(arr)
+                                withContext(Dispatchers.Main) {
+                                    incomingFriendRequests = list
+                                }
+                            }
+                            .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                    }
+                }
+
                 LaunchedEffect(Unit) {
                     token ?: return@LaunchedEffect
                     BackendClient.get("/auth/me", token)
@@ -140,8 +179,9 @@ class ProfileActivity : ComponentActivity() {
                         }
                         .onFailure { handle401(context, it) }
 
-                    // Fetch initial friends list
+                    // Fetch initial friends list and incoming requests
                     refetchFriends()
+                    refetchIncomingFriendRequests()
                 }
 
                 fun uploadProfilePhoto(photoFile: File) {
@@ -229,11 +269,17 @@ class ProfileActivity : ComponentActivity() {
                     scope.launch {
                         val body = JSONObject().apply { put("email", email) }
                         BackendClient.post("/friends/add_friend", body, token = t)
-                            .onSuccess {
+                            .onSuccess { json ->
+                                val pending = json.optBoolean("pending", true)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Friend added", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        context,
+                                        if (pending) "Friend request sent" else "Friend added",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                                 refetchFriends()
+                                refetchIncomingFriendRequests()
                             }
                             .onFailure { e ->
                                 withContext(Dispatchers.Main) {
@@ -242,7 +288,60 @@ class ProfileActivity : ComponentActivity() {
                                     } else {
                                         Toast.makeText(
                                             context,
-                                            e.message ?: "Failed to add friend",
+                                            e.message ?: "Failed to send friend request",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                    }
+                }
+
+                fun acceptFriendRequest(requestId: Int) {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.post("/friends/requests/$requestId/accept", JSONObject(), token = t)
+                            .onSuccess {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Friend added", Toast.LENGTH_SHORT).show()
+                                }
+                                refetchFriends()
+                                refetchIncomingFriendRequests()
+                            }
+                            .onFailure { e ->
+                                withContext(Dispatchers.Main) {
+                                    if (e is BackendException && e.statusCode == 401) {
+                                        handle401(context, e)
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            e.message ?: "Failed to accept request",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }
+                    }
+                }
+
+                fun declineFriendRequest(requestId: Int) {
+                    val t = AuthTokenStore.get() ?: return
+                    scope.launch {
+                        BackendClient.post("/friends/requests/$requestId/decline", null, token = t)
+                            .onSuccess {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Request declined", Toast.LENGTH_SHORT).show()
+                                }
+                                refetchIncomingFriendRequests()
+                            }
+                            .onFailure { e ->
+                                withContext(Dispatchers.Main) {
+                                    if (e is BackendException && e.statusCode == 401) {
+                                        handle401(context, e)
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            e.message ?: "Failed to decline request",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     }
@@ -318,6 +417,7 @@ class ProfileActivity : ComponentActivity() {
                 ProfileScreen(
                     user = user,
                     friends = friends,
+                    incomingFriendRequests = incomingFriendRequests,
                     darkModeEnabled = darkMode,
                     onDarkModeChange = { darkMode = it; DarkModeStore.set(applicationContext, it) },
                     onBack = { finish() },
@@ -325,6 +425,8 @@ class ProfileActivity : ComponentActivity() {
                     onSaveName = ::saveName,
                     onGetFriendLink = ::getFriendLink,
                     onAddFriendByEmail = ::addFriendByEmail,
+                    onAcceptFriendRequest = ::acceptFriendRequest,
+                    onDeclineFriendRequest = ::declineFriendRequest,
                     onLogout = ::logout
                 )
             }
@@ -337,6 +439,7 @@ class ProfileActivity : ComponentActivity() {
 fun ProfileScreen(
     user: UserProfile?,
     friends: List<UserProfile> = emptyList(),
+    incomingFriendRequests: List<IncomingFriendRequest> = emptyList(),
     darkModeEnabled: Boolean = false,
     onDarkModeChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
@@ -344,6 +447,8 @@ fun ProfileScreen(
     onSaveName: ((String) -> Unit)? = null,
     onGetFriendLink: (() -> Unit)? = null,
     onAddFriendByEmail: ((String) -> Unit)? = null,
+    onAcceptFriendRequest: ((Int) -> Unit)? = null,
+    onDeclineFriendRequest: ((Int) -> Unit)? = null,
     onLogout: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -458,6 +563,85 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            // Incoming friend requests (accept / decline)
+            if (incomingFriendRequests.isNotEmpty() &&
+                onAcceptFriendRequest != null &&
+                onDeclineFriendRequest != null
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Friend requests",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    incomingFriendRequests.forEach { req ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        AsyncImage(
+                                            model = req.requester.profilePictureUrl.orDefaultAvatar(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = req.requester.name.ifBlank { "Unnamed" },
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = req.requester.email,
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(onClick = { onDeclineFriendRequest(req.id) }) {
+                                        Text("Decline", color = MaterialTheme.colorScheme.error)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(onClick = { onAcceptFriendRequest(req.id) }) {
+                                        Text("Accept")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
             // Friends section
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -501,7 +685,7 @@ fun ProfileScreen(
                         enabled = friendEmail.isNotBlank(),
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Add friend")
+                        Text("Send friend request")
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))

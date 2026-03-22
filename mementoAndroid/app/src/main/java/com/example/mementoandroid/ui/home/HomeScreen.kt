@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +55,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -87,6 +91,8 @@ fun HomeScreen(
     albums: List<AlbumUi>,
     standalonePhotos: List<AlbumPhotoUi> = emptyList(),
     myPhotosAlbumId: Int? = null,
+    /** True while the first albums + mementos fetch is in progress; shows skeleton instead of empty state. */
+    isHomeDataLoading: Boolean = false,
     modifier: Modifier = Modifier,
     profilePictureUrl: String? = null,
     albumSuggestion: SuggestedAlbumUi? = null,
@@ -114,6 +120,10 @@ fun HomeScreen(
 
     val albumsWithoutMyPhotos = remember(albums, myPhotosAlbumId) {
         if (myPhotosAlbumId == null) albums else albums.filter { it.id != myPhotosAlbumId }
+    }
+    /** True if there is at least one standalone memento or album to potentially show (sort/filter only then). */
+    val hasHomeContent = remember(standalonePhotos, albumsWithoutMyPhotos) {
+        standalonePhotos.isNotEmpty() || albumsWithoutMyPhotos.isNotEmpty()
     }
     val homeItems = remember(standalonePhotos, myPhotosAlbumId, albumsWithoutMyPhotos, homeSort, homeFilter) {
         val aid = myPhotosAlbumId ?: 0
@@ -199,13 +209,15 @@ fun HomeScreen(
                 )
             }
 
-            SortAndFilterRow(
-                sort = homeSort,
-                onSortChange = { homeSort = it },
-                filter = homeFilter,
-                onFilterChange = { homeFilter = it },
-                modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 2.dp)
-            )
+            if (hasHomeContent) {
+                SortAndFilterRow(
+                    sort = homeSort,
+                    onSortChange = { homeSort = it },
+                    filter = homeFilter,
+                    onFilterChange = { homeFilter = it },
+                    modifier = Modifier.padding(start = 16.dp, top = 2.dp, end = 16.dp, bottom = 2.dp)
+                )
+            }
 
             if (albumSuggestion != null) {
                 AlbumSuggestionBanner(
@@ -217,78 +229,122 @@ fun HomeScreen(
                 )
             }
 
-            if (showTileView) {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    items(
-                        items = filteredItems,
-                        key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
-                    ) { item ->
-                        when (item) {
-                            is HomeItem.StandalonePhoto -> StandalonePhotoTile(
-                                photo = item.photo,
-                                title = item.displayTitle(),
-                                onClick = { onStandalonePhotoClick(item.photo) },
-                            )
-                            is HomeItem.Album -> AlbumTile(
-                                album = item.album,
-                                onClick = { onAlbumClick(item.album.id) },
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when {
+                    isHomeDataLoading -> {
+                        HomeFeedLoadingPlaceholder(
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    filteredItems.isEmpty() && searchQuery.isBlank() -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 32.dp, vertical = 24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = "Tap the + button to start adding mementos and albums!",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
                             )
                         }
                     }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                ) {
-                    items(
-                        items = filteredItems,
-                        key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
-                    ) { item ->
-                        when (item) {
-                            is HomeItem.StandalonePhoto -> ListItem(
-                                modifier = Modifier.clickable { onStandalonePhotoClick(item.photo) },
-                                colors = ListItemDefaults.colors(
-                                    containerColor = Color.Transparent,
-                                ),
-                                leadingContent = {
-                                    StandalonePhotoThumbnail(photo = item.photo, size = 32.dp)
-                                },
-                                headlineContent = {
-                                    Text(
-                                        item.displayTitle(),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                            )
-                            is HomeItem.Album -> ListItem(
-                                modifier = Modifier.clickable { onAlbumClick(item.album.id) },
-                                colors = ListItemDefaults.colors(
-                                    containerColor = Color.Transparent,
-                                ),
-                                leadingContent = {
-                                    AlbumLogo(
-                                        album = item.album,
-                                        size = 32.dp,
-                                    )
-                                },
-                                headlineContent = {
-                                    Text(
-                                        item.album.name,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                    )
-                                },
+                    filteredItems.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "No matches for your search",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(32.dp),
                             )
                         }
-                        HorizontalDivider()
+                    }
+                    showTileView -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(3),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            items(
+                                items = filteredItems,
+                                key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
+                            ) { item ->
+                                when (item) {
+                                    is HomeItem.StandalonePhoto -> StandalonePhotoTile(
+                                        photo = item.photo,
+                                        title = item.displayTitle(),
+                                        onClick = { onStandalonePhotoClick(item.photo) },
+                                    )
+                                    is HomeItem.Album -> AlbumTile(
+                                        album = item.album,
+                                        onClick = { onAlbumClick(item.album.id) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(0.dp),
+                        ) {
+                            items(
+                                items = filteredItems,
+                                key = { item -> when (item) { is HomeItem.StandalonePhoto -> "photo-${item.photo.id}"; is HomeItem.Album -> "album-${item.album.id}" } },
+                            ) { item ->
+                                when (item) {
+                                    is HomeItem.StandalonePhoto -> ListItem(
+                                        modifier = Modifier.clickable { onStandalonePhotoClick(item.photo) },
+                                        colors = ListItemDefaults.colors(
+                                            containerColor = Color.Transparent,
+                                        ),
+                                        leadingContent = {
+                                            StandalonePhotoThumbnail(photo = item.photo, size = 32.dp)
+                                        },
+                                        headlineContent = {
+                                            Text(
+                                                item.displayTitle(),
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                    )
+                                    is HomeItem.Album -> ListItem(
+                                        modifier = Modifier.clickable { onAlbumClick(item.album.id) },
+                                        colors = ListItemDefaults.colors(
+                                            containerColor = Color.Transparent,
+                                        ),
+                                        leadingContent = {
+                                            AlbumLogo(
+                                                album = item.album,
+                                                size = 32.dp,
+                                            )
+                                        },
+                                        headlineContent = {
+                                            Text(
+                                                item.album.name,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                        },
+                                    )
+                                }
+                                HorizontalDivider()
+                            }
+                        }
                     }
                 }
             }
@@ -356,6 +412,47 @@ fun HomeScreen(
                     ) {
                         Text("Make an Album")
                     }
+                }
+            }
+        }
+    }
+}
+
+/** Shown while albums + mementos are loading so the empty-state hint does not flash. */
+@Composable
+private fun HomeFeedLoadingPlaceholder(modifier: Modifier = Modifier) {
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f)
+    Column(
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.padding(bottom = 20.dp),
+            color = MaterialTheme.colorScheme.primary,
+            strokeWidth = 3.dp,
+        )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            repeat(6) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(skeletonColor),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(16.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(skeletonColor),
+                    )
                 }
             }
         }

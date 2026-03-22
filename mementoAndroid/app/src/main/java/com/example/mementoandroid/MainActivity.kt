@@ -188,6 +188,8 @@ class MainActivity : ComponentActivity() {
 
                 var albumSuggestion by remember { mutableStateOf<SuggestedAlbumUi?>(null) }
                 var albumSuggestionBusy by remember { mutableStateOf(false) }
+                /** False after first home feed load (albums + My Photos images) finishes or fails. */
+                var isHomeDataLoading by remember { mutableStateOf(true) }
 
                 var showFriendPicker by remember { mutableStateOf(false) }
                 var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
@@ -245,7 +247,11 @@ class MainActivity : ComponentActivity() {
                 }
 
                 LaunchedEffect(Unit) {
-                    val t = AuthTokenStore.get() ?: return@LaunchedEffect
+                    val t = AuthTokenStore.get()
+                    if (t == null) {
+                        isHomeDataLoading = false
+                        return@LaunchedEffect
+                    }
                     val pendingToken = PendingFriendTokenStore.get(context)
                     if (pendingToken != null) {
                         PendingFriendTokenStore.clear(context)
@@ -300,18 +306,31 @@ class MainActivity : ComponentActivity() {
                                         withContext(Dispatchers.Main) {
                                             standalonePhotos = photoList
                                             myPhotosAlbumId = myPhotos.id
+                                            isHomeDataLoading = false
                                         }
                                         loadAlbumSuggestion()
+                                    }
+                                    .onFailure { e ->
+                                        withContext(Dispatchers.Main) {
+                                            standalonePhotos = emptyList()
+                                            myPhotosAlbumId = myPhotos.id
+                                            isHomeDataLoading = false
+                                        }
+                                        handle401(context, e)
                                     }
                             } else {
                                 withContext(Dispatchers.Main) {
                                     standalonePhotos = emptyList()
                                     myPhotosAlbumId = null
+                                    isHomeDataLoading = false
                                 }
                                 loadAlbumSuggestion()
                             }
                         }
-                        .onFailure { handle401(context, it) }
+                        .onFailure { e ->
+                            withContext(Dispatchers.Main) { isHomeDataLoading = false }
+                            handle401(context, e)
+                        }
                     // Clear the album_id intent extra after consuming it
                     intent.removeExtra("album_id")
                 }
@@ -1355,6 +1374,7 @@ class MainActivity : ComponentActivity() {
                                 albums = albums,
                                 standalonePhotos = standalonePhotos,
                                 myPhotosAlbumId = myPhotosAlbumId,
+                                isHomeDataLoading = isHomeDataLoading,
                                 profilePictureUrl = currentUserProfilePictureUrl,
                                 albumSuggestion = albumSuggestion,
                                 albumSuggestionBusy = albumSuggestionBusy,

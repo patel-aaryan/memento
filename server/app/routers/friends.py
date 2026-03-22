@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Security
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from app.config.db import get_db
 from app.config.settings import get_settings
-from app.dependencies.auth import get_current_user, security
+from app.dependencies.auth import get_current_user
 from app.repositories.user_repository import get_user_by_email, get_user_by_id, get_users_by_ids
 from app.repositories.friend_repository import add_friendship, get_friend_ids
+from app.repositories import friend_request_repository as fr_req
 from app.schemas.auth import UserResponse
-from app.schemas.friend import AddFriendRequest, AddFriendByLinkRequest, FriendLinkResponse
+from app.schemas.friend import (
+    AddFriendRequest,
+    AddFriendByLinkRequest,
+    FriendLinkResponse,
+    AddFriendEmailResponse,
+    IncomingFriendRequestResponse,
+)
 from app.utils.auth import create_access_token, decode_access_token
 from datetime import timedelta
 
@@ -17,13 +24,16 @@ settings = get_settings()
 FRIEND_LINK_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 
-@router.post("/add_friend", response_model=UserResponse)
+@router.post("/add_friend", response_model=AddFriendEmailResponse)
 async def add_friend_by_email(
     body: AddFriendRequest,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Add a friend by their email. Friendship is bidirectional."""
+    """
+    Send a friend request by email, or become friends immediately if they already sent you one.
+    The recipient accepts or declines via POST /friends/requests/{id}/accept|decline.
+    """
     if body.email.lower() == current_user["email"].lower():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -35,13 +45,99 @@ async def add_friend_by_email(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No user found with that email",
         )
-    added = add_friendship(db, current_user["id"], friend["id"])
-    if not added:
+    fid = friend["id"]
+    uid = current_user["id"]
+
+    friend_ids = get_friend_ids(db, uid)
+    if fid in friend_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Already friends with this user",
         )
-    return UserResponse(**get_user_by_id(db, friend["id"]))
+
+    pending = fr_req.find_pending_between(db, uid, fid)
+    if pending:
+        # They already sent you a request — accept automatically
+        if pending["recipient_id"] == uid:
+            add_friendship(db, uid, pending["requester_id"])
+            fr_req.delete_request(db, pending["id"])
+            full = get_user_by_id(db, fid)
+            return AddFriendEmailResponse(
+                pending=False,
+                user=UserResponse(**full),
+            )
+        # You already sent them a request
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Friend request already sent",
+        )
+
+    inserted = fr_req.create_request(db, uid, fid)
+    if not inserted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Friend request already sent",
+        )
+    return AddFriendEmailResponse(pending=True, user=None)
+
+
+@router.get("/requests/incoming", response_model=list[IncomingFriendRequestResponse])
+async def list_incoming_friend_requests(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Pending requests where you are the recipient (can accept or decline)."""
+    rows = fr_req.find_pending_incoming(db, current_user["id"])
+    out: list[IncomingFriendRequestResponse] = []
+    for row in rows:
+        u = get_user_by_id(db, row["requester_id"])
+        if u:
+            out.append(
+                IncomingFriendRequestResponse(
+                    id=row["id"],
+                    requester=UserResponse(**u),
+                )
+            )
+    return out
+
+
+@router.post("/requests/{request_id}/accept", response_model=UserResponse)
+async def accept_friend_request(
+    request_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = fr_req.get_request_by_id_for_recipient(db, request_id, current_user["id"])
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Friend request not found",
+        )
+    added = add_friendship(db, current_user["id"], row["requester_id"])
+    fr_req.delete_request(db, request_id)
+    if not added:
+        # Already friends (race); still removed request
+        pass
+    other = get_user_by_id(db, row["requester_id"])
+    if not other:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return UserResponse(**other)
+
+
+@router.post("/requests/{request_id}/decline", status_code=status.HTTP_204_NO_CONTENT)
+async def decline_friend_request(
+    request_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = fr_req.get_request_by_id_for_recipient(db, request_id, current_user["id"])
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Friend request not found",
+        )
+    fr_req.delete_request(db, request_id)
+    return None
 
 
 @router.get("/get_friend_link", response_model=FriendLinkResponse)
