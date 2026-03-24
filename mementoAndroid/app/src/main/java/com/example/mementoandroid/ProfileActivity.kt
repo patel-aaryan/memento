@@ -1,7 +1,10 @@
 package com.example.mementoandroid
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.util.Log
@@ -44,6 +47,7 @@ import com.example.mementoandroid.api.BackendException
 import com.example.mementoandroid.api.getFcmToken
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.components.AddPhotoBottomSheet
+import com.example.mementoandroid.util.AnniversaryNotificationsStore
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.orDefaultAvatar
@@ -100,8 +104,12 @@ class ProfileActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         AuthTokenStore.init(applicationContext)
         DarkModeStore.init(applicationContext)
+        AnniversaryNotificationsStore.init(applicationContext)
         setContent {
             var darkMode by remember { mutableStateOf(DarkModeStore.get(applicationContext)) }
+            var anniversaryNotificationsEnabled by remember {
+                mutableStateOf(AnniversaryNotificationsStore.isEnabled(applicationContext))
+            }
             MementoAndroidTheme(darkTheme = darkMode) {
                 val context = LocalContext.current as ComponentActivity
                 val token = AuthTokenStore.get()
@@ -227,6 +235,39 @@ class ProfileActivity : ComponentActivity() {
                                 uploadProfilePhoto(file)
                             }
                         }
+                    }
+                }
+
+                val anniversaryLocationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { granted ->
+                    if (granted) {
+                        AnniversaryNotificationsStore.setEnabled(applicationContext, true)
+                        anniversaryNotificationsEnabled = true
+                    } else {
+                        Toast.makeText(
+                            context,
+                            "Location permission is needed for memory anniversary reminders",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+
+                fun onAnniversaryNotificationsChange(enabled: Boolean) {
+                    if (enabled) {
+                        val fine = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        )
+                        if (fine == PackageManager.PERMISSION_GRANTED) {
+                            AnniversaryNotificationsStore.setEnabled(applicationContext, true)
+                            anniversaryNotificationsEnabled = true
+                        } else {
+                            anniversaryLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                    } else {
+                        AnniversaryNotificationsStore.setEnabled(applicationContext, false)
+                        anniversaryNotificationsEnabled = false
                     }
                 }
 
@@ -420,6 +461,8 @@ class ProfileActivity : ComponentActivity() {
                     incomingFriendRequests = incomingFriendRequests,
                     darkModeEnabled = darkMode,
                     onDarkModeChange = { darkMode = it; DarkModeStore.set(applicationContext, it) },
+                    anniversaryNotificationsEnabled = anniversaryNotificationsEnabled,
+                    onAnniversaryNotificationsChange = { onAnniversaryNotificationsChange(it) },
                     onBack = { finish() },
                     onProfilePictureClick = { addPhotoSheetOpen = true },
                     onSaveName = ::saveName,
@@ -442,6 +485,8 @@ fun ProfileScreen(
     incomingFriendRequests: List<IncomingFriendRequest> = emptyList(),
     darkModeEnabled: Boolean = false,
     onDarkModeChange: (Boolean) -> Unit = {},
+    anniversaryNotificationsEnabled: Boolean = false,
+    onAnniversaryNotificationsChange: (Boolean) -> Unit = {},
     onBack: () -> Unit,
     onProfilePictureClick: () -> Unit,
     onSaveName: ((String) -> Unit)? = null,
@@ -557,6 +602,27 @@ fun ProfileScreen(
                     Switch(
                         checked = darkModeEnabled,
                         onCheckedChange = onDarkModeChange
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text(text = "Memory anniversary reminders", fontSize = 16.sp)
+                        Text(
+                            text = "Uses your location to notify you when you are near a place you photographed a year ago.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = anniversaryNotificationsEnabled,
+                        onCheckedChange = onAnniversaryNotificationsChange
                     )
                 }
             }

@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.example.mementoandroid.MainActivity
 import com.example.mementoandroid.R
+import com.example.mementoandroid.util.AnniversaryNotificationsStore
 import com.example.mementoandroid.util.AuthTokenStore
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.messaging.FirebaseMessaging
@@ -25,7 +26,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
 
 /** Suspend helper to get the current FCM token. Use from coroutines. */
 suspend fun getFcmToken(): String? = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
@@ -42,6 +42,8 @@ class FirebaseClient : FirebaseMessagingService() {
         private const val TAG = "FCM"
         private const val CHANNEL_ID = "memento_notifications"
         private const val CHANNEL_NAME = "Memento Notifications"
+        private const val ANNIVERSARY_TITLE = "Memory anniversary"
+        private const val ANNIVERSARY_BODY = "You were here a year ago. Want to add a new photo?"
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -49,6 +51,7 @@ class FirebaseClient : FirebaseMessagingService() {
     override fun onCreate() {
         super.onCreate()
         AuthTokenStore.init(applicationContext)
+        AnniversaryNotificationsStore.init(applicationContext)
     }
 
     override fun onNewToken(token: String) {
@@ -74,9 +77,22 @@ class FirebaseClient : FirebaseMessagingService() {
 
         when (messageType) {
             "anniversary_location_check" -> {
+                if (!AnniversaryNotificationsStore.isEnabled(applicationContext)) {
+                    Log.d(TAG, "Anniversary location check ignored (disabled in settings)")
+                    return
+                }
                 serviceScope.launch {
                     handleAnniversaryLocationCheck()
                 }
+            }
+            "anniversary" -> {
+                if (!AnniversaryNotificationsStore.isEnabled(applicationContext)) {
+                    Log.d(TAG, "Anniversary push ignored (disabled in settings)")
+                    return
+                }
+                val title = remoteMessage.notification?.title ?: ANNIVERSARY_TITLE
+                val body = remoteMessage.notification?.body ?: ANNIVERSARY_BODY
+                showNotification(title, body)
             }
             "album_invite" -> {
                 val title = remoteMessage.notification?.title ?: "Memento"
@@ -100,6 +116,7 @@ class FirebaseClient : FirebaseMessagingService() {
 
     private suspend fun handleAnniversaryLocationCheck() {
         withContext(Dispatchers.IO) {
+            if (!AnniversaryNotificationsStore.isEnabled(applicationContext)) return@withContext
             AuthTokenStore.init(applicationContext)
             val authToken = AuthTokenStore.get() ?: return@withContext
             val location = getLastLocation() ?: return@withContext
