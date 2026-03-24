@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,9 +38,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.drawable.toBitmap
@@ -373,6 +376,8 @@ private fun pickLargestFittableSubset(points: List<LatLng>, fitDiagonalKm: Doubl
 fun MapScreen(
     photos: List<AlbumPhotoUi>,
     onPhotoClick: (String) -> Unit,
+    /** Multi-photo cluster at a single map point: open first photo and sort album by location. */
+    onSameLocationClusterClick: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val photosWithLocation = remember(photos) {
@@ -480,15 +485,42 @@ fun MapScreen(
 
     var clusters by remember { mutableStateOf<List<PhotoCluster>>(emptyList()) }
     var mapRef by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
+    var mapViewSize by remember { mutableStateOf(IntSize.Zero) }
+    var offScreenHudItems by remember { mutableStateOf<List<OffScreenHudItem>>(emptyList()) }
+    val density = LocalDensity.current
+    // Match avatar/cluster markers (~70.dp diameter) so HUD hides until the pin is fully off-screen.
+    val markerRadiusPx = remember(density) { with(density) { 35.dp.toPx() } }
+    val hudPlacementInsetPx = remember(density) { with(density) { 20.dp.toPx() } }
+
+    LaunchedEffect(mapRef, mapViewSize, clusters, markerRadiusPx, hudPlacementInsetPx) {
+        val map = mapRef ?: return@LaunchedEffect
+        val w = mapViewSize.width
+        val h = mapViewSize.height
+        if (w <= 0 || h <= 0) return@LaunchedEffect
+        fun recomputeHud() {
+            offScreenHudItems = computeOffScreenHudItems(
+                map = map,
+                clusters = clusters,
+                mapWidthPx = w,
+                mapHeightPx = h,
+                markerRadiusPx = markerRadiusPx,
+                hudPlacementInsetPx = hudPlacementInsetPx,
+            )
+        }
+        recomputeHud()
+        snapshotFlow { cameraPositionState.position }
+            .collect { recomputeHud() }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxSize()
+                .onGloballyPositioned { coords -> mapViewSize = coords.size }
         ) {
             GoogleMap(
-//        modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
                 properties = mapProperties,
                 uiSettings = com.google.maps.android.compose.MapUiSettings(zoomControlsEnabled = false)
@@ -561,7 +593,13 @@ fun MapScreen(
                             // Single pins sit "below" clusters when overlapping.
                             zIndex = 0f,
                             onClick = {
-                                onPhotoClick(photo.id)
+                                runClusterMarkerAction(
+                                    cluster,
+                                    cameraPositionState,
+                                    scope,
+                                    onPhotoClick,
+                                    onSameLocationClusterClick,
+                                )
                                 true
                             }
                         )
@@ -603,52 +641,13 @@ fun MapScreen(
                             // Make clusters sit above individual pins so taps prefer clusters.
                             zIndex = 1f,
                             onClick = {
-                                val oldZoom = cameraPositionState.position.zoom
-                                val latLngs = cluster.photos.mapNotNull { p ->
-                                    val lat = p.latitude
-                                    val lng = p.longitude
-                                    if (lat == null || lng == null) null else LatLng(lat, lng)
-                                }
-
-                                // Fit clicked cluster to view with padding. This is much more reliable
-                                // than "zoom + N" because it adapts to how spread out the cluster is.
-                                val moved = runCatching {
-                                    if (latLngs.isEmpty()) return@runCatching false
-
-                                    val unique = latLngs.distinct()
-                                    if (unique.size == 1) {
-                                        // Degenerate bounds (all points same). Just zoom in.
-                                        val targetZoom = (oldZoom + 2f).coerceAtMost(20f)
-                                        scope.launch {
-                                            cameraPositionState.animate(
-                                                CameraUpdateFactory.newLatLngZoom(unique.first(), targetZoom)
-                                            )
-                                        }
-                                        true
-                                    } else {
-                                        val b = LatLngBounds.builder()
-                                        unique.forEach { b.include(it) }
-                                        val bounds = b.build()
-                                        val paddingPx = 220
-                                        scope.launch {
-                                            cameraPositionState.animate(
-                                                CameraUpdateFactory.newLatLngBounds(bounds, paddingPx)
-                                            )
-                                        }
-                                        true
-                                    }
-                                }.getOrElse { false }
-
-                                if (!moved) {
-                                    // Fallback: at least attempt a zoom-in centered on cluster.
-                                    val targetZoom = (oldZoom + 2f).coerceAtMost(20f)
-                                    scope.launch {
-                                        cameraPositionState.animate(
-                                            CameraUpdateFactory.newLatLngZoom(cluster.position, targetZoom)
-                                        )
-                                    }
-                                }
-
+                                runClusterMarkerAction(
+                                    cluster,
+                                    cameraPositionState,
+                                    scope,
+                                    onPhotoClick,
+                                    onSameLocationClusterClick,
+                                )
                                 true
                             }
                         )
@@ -656,109 +655,21 @@ fun MapScreen(
                 }
             }
 
-            // Yellow off-screen indicators for clusters/photos outside the viewport.
-            // Each tick is drawn on the edge pointing toward the off-screen cluster.
-//            Canvas(modifier = Modifier.fillMaxSize()) {
-//                val map = mapRef ?: return@Canvas
-//                val w = size.width
-//                val h = size.height
-//                if (w <= 0f || h <= 0f) return@Canvas
-//
-//                val insetPx = with(density) { 5.dp.toPx() }
-//                val lineLen = with(density) { 18.dp.toPx() }
-//                val strokeW = with(density) { 3.dp.toPx() }
-//                val binPx = with(density) { 14.dp.toPx() }.coerceAtLeast(6f)
-//
-//                val left = insetPx
-//                val right = w - insetPx
-//                val top = insetPx
-//                val bottom = h - insetPx
-//
-//                val cx = w / 2f
-//                val cy = h / 2f
-//
-//                val proj = map.projection
-//                val seen = HashSet<String>()
-//                val yellow = ComposeColor(0xFFFFEB3B)
-//
-//                clusters.forEach { cluster ->
-//                    val pt = proj.toScreenLocation(cluster.position)
-//                    val x = pt.x.toFloat()
-//                    val y = pt.y.toFloat()
-//
-//                    val inside = x in left..right && y in top..bottom
-//                    if (inside) return@forEach
-//
-//                    val dx = x - cx
-//                    val dy = y - cy
-//                    if (dx == 0f && dy == 0f) return@forEach
-//
-//                    // Intersect ray from center -> point with the inset rectangle.
-//                    var t = Float.POSITIVE_INFINITY
-//                    if (dx > 0f) t = min(t, (right - cx) / dx)
-//                    if (dx < 0f) t = min(t, (left - cx) / dx)
-//                    if (dy > 0f) t = min(t, (bottom - cy) / dy)
-//                    if (dy < 0f) t = min(t, (top - cy) / dy)
-//                    if (!t.isFinite() || t <= 0f) return@forEach
-//
-//                    val ix = (cx + dx * t).coerceIn(left, right)
-//                    val iy = (cy + dy * t).coerceIn(top, bottom)
-//
-//                    val edge = when {
-//                        abs(ix - left) < 1.5f -> "L"
-//                        abs(ix - right) < 1.5f -> "R"
-//                        abs(iy - top) < 1.5f -> "T"
-//                        abs(iy - bottom) < 1.5f -> "B"
-//                        else -> {
-//                            // Fallback: pick nearest edge.
-//                            val dl = abs(ix - left)
-//                            val dr = abs(ix - right)
-//                            val dt = abs(iy - top)
-//                            val db = abs(iy - bottom)
-//                            val m = min(min(dl, dr), min(dt, db))
-//                            when (m) {
-//                                dl -> "L"
-//                                dr -> "R"
-//                                dt -> "T"
-//                                else -> "B"
-//                            }
-//                        }
-//                    }
-//
-//                    val key = when (edge) {
-//                        "L", "R" -> "$edge:${(iy / binPx).toInt()}"
-//                        else -> "$edge:${(ix / binPx).toInt()}"
-//                    }
-//                    if (!seen.add(key)) return@forEach
-//
-//                    when (edge) {
-//                        "L", "R" -> {
-//                            val xEdge = if (edge == "L") left else right
-//                            val y0 = (iy - lineLen / 2f).coerceIn(top, bottom)
-//                            val y1 = (iy + lineLen / 2f).coerceIn(top, bottom)
-//                            drawLine(
-//                                color = yellow,
-//                                start = Offset(xEdge, y0),
-//                                end = Offset(xEdge, y1),
-//                                strokeWidth = strokeW,
-//                                cap = StrokeCap.Round
-//                            )
-//                        }
-//                        "T", "B" -> {
-//                            val yEdge = if (edge == "T") top else bottom
-//                            val x0 = (ix - lineLen / 2f).coerceIn(left, right)
-//                            val x1 = (ix + lineLen / 2f).coerceIn(left, right)
-//                            drawLine(
-//                                color = yellow,
-//                                start = Offset(x0, yEdge),
-//                                end = Offset(x1, yEdge),
-//                                strokeWidth = strokeW,
-//                                cap = StrokeCap.Round
-//                            )
-//                        }
-//                    }
-//                }
-//            }
+            MapOffScreenIndicatorLayer(
+                items = offScreenHudItems,
+                indicatorSizeDp = 40f,
+                density = density,
+                onIndicatorClick = { cluster ->
+                    runOffScreenIndicatorClick(
+                        cluster,
+                        cameraPositionState,
+                        scope,
+                        onPhotoClick,
+                        onSameLocationClusterClick,
+                    )
+                },
+            )
+
             TimeGradientLegend(
                 startDate = firstDate,
                 endDate = lastDate,
@@ -795,6 +706,11 @@ fun MapScreen(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showMissingInfoDialog = false
+                                        onPhotoClick(entry.photo.id)
+                                    }
                                     .padding(vertical = 4.dp)
                             ) {
                                 val thumbBitmap by produceState<Bitmap?>(initialValue = null, entry.photo) {
@@ -804,12 +720,7 @@ fun MapScreen(
                                     androidx.compose.foundation.Image(
                                         bitmap = thumbBitmap!!.asImageBitmap(),
                                         contentDescription = null,
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clickable {
-                                                showMissingInfoDialog = false
-                                                onPhotoClick(entry.photo.id)
-                                            }
+                                        modifier = Modifier.size(48.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.size(8.dp))

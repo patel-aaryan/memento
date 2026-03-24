@@ -35,6 +35,8 @@ fun AlbumScreen(
     onDeleteAlbum: () -> Unit,
     onAddFriend: () -> Unit,
     onPhotoClick: (photoId: String) -> Unit,
+    /** Map: inseparable cluster (same coordinates) — sort by location and open first photo. */
+    onSameLocationClusterClick: (photoId: String) -> Unit,
     onAddPhoto: (source: AddPhotoSource) -> Unit,
     onSaveEdits: (newName: String?, imageIdsToDelete: List<String>) -> Unit = { _, _ -> },
     onSharePhotos: (List<AlbumPhotoUi>) -> Unit = {},
@@ -138,7 +140,8 @@ fun AlbumScreen(
             if (showMap) {
                 MapScreen(
                     photos = displayPhotos,
-                    onPhotoClick = onPhotoClick
+                    onPhotoClick = onPhotoClick,
+                    onSameLocationClusterClick = onSameLocationClusterClick
                 )
             } else {
                 PhotoGrid(
