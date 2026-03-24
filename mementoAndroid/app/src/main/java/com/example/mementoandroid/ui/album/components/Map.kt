@@ -485,6 +485,7 @@ fun MapScreen(
 
     var clusters by remember { mutableStateOf<List<PhotoCluster>>(emptyList()) }
     var mapRef by remember { mutableStateOf<com.google.android.gms.maps.GoogleMap?>(null) }
+    val mapMaxZoom: () -> Float = { mapRef?.maxZoomLevel ?: 20f }
     var mapViewSize by remember { mutableStateOf(IntSize.Zero) }
     var offScreenHudItems by remember { mutableStateOf<List<OffScreenHudItem>>(emptyList()) }
     val density = LocalDensity.current
@@ -599,6 +600,7 @@ fun MapScreen(
                                     scope,
                                     onPhotoClick,
                                     onSameLocationClusterClick,
+                                    mapMaxZoom,
                                 )
                                 true
                             }
@@ -647,6 +649,7 @@ fun MapScreen(
                                     scope,
                                     onPhotoClick,
                                     onSameLocationClusterClick,
+                                    mapMaxZoom,
                                 )
                                 true
                             }
@@ -666,6 +669,7 @@ fun MapScreen(
                         scope,
                         onPhotoClick,
                         onSameLocationClusterClick,
+                        mapMaxZoom,
                     )
                 },
             )
