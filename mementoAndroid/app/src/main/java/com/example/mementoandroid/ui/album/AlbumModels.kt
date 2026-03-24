@@ -14,12 +14,29 @@ data class AlbumPhotoUi(
     val locationName: String? = null,
     val dateAdded: String? = null,
     val takenAt: String? = null,
-    val userId: Int? = null
+    val userId: Int? = null,
+    /** Grid/map skeleton tiles when no real image row is loaded yet. */
+    val isPlaceholder: Boolean = false,
 ) {
     init {
-        require(listOf(imageRes, uri, imageUrl).any { it != null }) {
-            "One of imageRes, uri, or imageUrl must be set"
+        if (!isPlaceholder) {
+            require(listOf(imageRes, uri, imageUrl).any { it != null }) {
+                "One of imageRes, uri, or imageUrl must be set"
+            }
         }
+    }
+
+    companion object {
+        /** Matches a 3-column grid with a few rows so the album view never starts empty. */
+        const val DEFAULT_GRID_SKELETON_COUNT = 12
+
+        fun gridSkeleton(index: Int) = AlbumPhotoUi(
+            id = "skeleton-$index",
+            isPlaceholder = true,
+        )
+
+        fun defaultGridSkeletons(): List<AlbumPhotoUi> =
+            (0 until DEFAULT_GRID_SKELETON_COUNT).map { gridSkeleton(it) }
     }
 }
 
@@ -53,11 +70,12 @@ data class AlbumSort(
 )
 
 fun List<AlbumPhotoUi>.sortedAndFiltered(sort: AlbumSort): List<AlbumPhotoUi> {
-    var list = this
+    val (placeholders, nonPlaceholders) = partition { it.isPlaceholder }
+    var list = nonPlaceholders
     if (sort.kind == AlbumSortKind.UPLOADED_BY && sort.uploadedByUserId != null) {
         list = list.filter { it.userId == sort.uploadedByUserId }
     }
-    return when (sort.kind) {
+    val sorted = when (sort.kind) {
         AlbumSortKind.TIME_NEWEST_FIRST -> list.sortedByDescending { it.takenAt ?: it.dateAdded ?: "" }
         AlbumSortKind.TIME_OLDEST_FIRST -> list.sortedBy { it.takenAt ?: it.dateAdded ?: "" }
         AlbumSortKind.BY_LOCATION -> {
@@ -70,4 +88,11 @@ fun List<AlbumPhotoUi>.sortedAndFiltered(sort: AlbumSort): List<AlbumPhotoUi> {
         }
         AlbumSortKind.UPLOADED_BY -> list.sortedByDescending { it.takenAt ?: it.dateAdded ?: "" }
     }
+    return sorted + placeholders.sortedBy { it.id }
+}
+
+/** Default state for the album grid when no album is open or images are not loaded yet. */
+fun MutableList<AlbumPhotoUi>.replaceWithAlbumGridSkeletons() {
+    clear()
+    addAll(AlbumPhotoUi.defaultGridSkeletons())
 }

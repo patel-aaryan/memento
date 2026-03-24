@@ -59,6 +59,7 @@ import com.example.mementoandroid.ui.album.FriendUi
 import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
 import com.example.mementoandroid.ui.album.components.FriendPickerScreen
+import com.example.mementoandroid.ui.album.replaceWithAlbumGridSkeletons
 import com.example.mementoandroid.ui.album.sortedAndFiltered
 import com.example.mementoandroid.ui.home.HomeAddAction
 import com.example.mementoandroid.ui.home.HomePhotoEntryScreen
@@ -159,7 +160,11 @@ class MainActivity : ComponentActivity() {
                 var currentPhotoIndex by rememberSaveable { mutableStateOf(0) }
                 var albums by remember { mutableStateOf<List<AlbumUi>>(emptyList()) }
                 var currentUserProfilePictureUrl by remember { mutableStateOf<String?>(null) }
-                val photos = remember { mutableStateListOf<AlbumPhotoUi>() }
+                val photos = remember {
+                    mutableStateListOf<AlbumPhotoUi>().apply {
+                        addAll(AlbumPhotoUi.defaultGridSkeletons())
+                    }
+                }
                 var albumMembers by remember { mutableStateOf<List<FriendUi>>(emptyList()) }
                 var standalonePhotos by remember { mutableStateOf<List<AlbumPhotoUi>>(emptyList()) }
                 var myPhotosAlbumId by remember { mutableStateOf<Int?>(null) }
@@ -350,7 +355,7 @@ class MainActivity : ComponentActivity() {
                     if (aid == null) {
                         withContext(Dispatchers.Main) {
                             albumMembers = emptyList()
-                            photos.clear()
+                            photos.replaceWithAlbumGridSkeletons()
                         }
                         loadAlbumSuggestion()
                         return@LaunchedEffect
@@ -397,7 +402,7 @@ class MainActivity : ComponentActivity() {
                     }.onFailure { e ->
                         withContext(Dispatchers.Main) {
                             handle401(context, e)
-                            photos.clear()
+                            photos.replaceWithAlbumGridSkeletons()
                         }
                     }
                 }
@@ -1101,7 +1106,8 @@ class MainActivity : ComponentActivity() {
                                                 if (result.isSuccess) {
                                                     val newList = list.filter { it.id != photoToShow.id }
                                                     photos.clear()
-                                                    photos.addAll(newList)
+                                                    if (newList.isEmpty()) photos.replaceWithAlbumGridSkeletons()
+                                                    else photos.addAll(newList)
                                                     standalonePhotos = newList
                                                     pendingStandalonePhotoDetail = null
                                                     selectedAlbumId = null

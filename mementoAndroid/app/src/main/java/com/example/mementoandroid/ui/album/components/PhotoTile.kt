@@ -1,5 +1,11 @@
 package com.example.mementoandroid.ui.album.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,9 +20,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -46,7 +56,7 @@ fun PhotoTile(
                 else Modifier
             )
             .clickable(
-                enabled = !isEditMode || isSelectable,
+                enabled = (!isEditMode || isSelectable) && !photo.isPlaceholder,
                 onClick = {
                     if (isEditMode && isSelectable) onToggleSelect()
                     else if (!isEditMode) onClick()
@@ -56,6 +66,7 @@ fun PhotoTile(
     ) {
         Box {
             when {
+                photo.isPlaceholder -> AlbumGridSkeletonShimmer(modifier = Modifier.fillMaxSize())
                 photo.imageUrl != null -> AsyncImage(
                     model = photo.imageUrl,
                     contentDescription = null,
@@ -93,4 +104,29 @@ fun PhotoTile(
             }
         }
     }
+}
+
+@Composable
+private fun AlbumGridSkeletonShimmer(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "albumGridShimmer")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "albumGridShimmerShift",
+    )
+    val base = MaterialTheme.colorScheme.surfaceVariant
+    val brush = Brush.linearGradient(
+        colors = listOf(
+            base.copy(alpha = 0.35f + 0.45f * shift),
+            base.copy(alpha = 0.55f + 0.4f * (1f - shift)),
+            base.copy(alpha = 0.35f + 0.45f * shift),
+        ),
+        start = Offset(0f, 0f),
+        end = Offset(120f, 180f),
+    )
+    Box(modifier = modifier.background(brush))
 }
