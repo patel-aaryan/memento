@@ -1369,6 +1369,11 @@ class MainActivity : ComponentActivity() {
                                     showFriendPicker = true
                                 },
                                 onPhotoClick = { selectedPhotoId = it },
+                                onSameLocationClusterClick = { photoId ->
+                                    albumSort = AlbumSort(AlbumSortKind.BY_LOCATION)
+                                    AlbumSortStore.save(albumId, albumSort)
+                                    selectedPhotoId = photoId
+                                },
                                 onAddPhoto = ::onAddPhoto,
                                 onSaveEdits = { newName, imageIdsToDelete ->
                                     if (newName != null || imageIdsToDelete.isNotEmpty()) {
