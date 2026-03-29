@@ -173,7 +173,7 @@ fun FriendPickerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                placeholder = { Text("Search friends by username") },
+                placeholder = { Text("Search friends by email") },
                 leadingIcon = {
                     Icon(Icons.Default.Search, contentDescription = null)
                 },
