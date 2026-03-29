@@ -18,6 +18,10 @@ class AlbumResponse(BaseModel):
     created_at: str
     updated_at: str
     cover_image_urls: Optional[List[str]] = []
+    # Oldest image in the album (same ordering as cover thumb); for default titles
+    first_image_location_name: Optional[str] = None
+    first_image_taken_at: Optional[str] = None
+    first_image_date_added: Optional[str] = None
 
     class Config:
         from_attributes = True

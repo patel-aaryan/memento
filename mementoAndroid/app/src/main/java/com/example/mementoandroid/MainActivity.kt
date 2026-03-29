@@ -56,6 +56,8 @@ import com.example.mementoandroid.ui.album.AlbumSort
 import com.example.mementoandroid.ui.album.AlbumSortKind
 import com.example.mementoandroid.ui.album.AlbumUi
 import com.example.mementoandroid.ui.album.FriendUi
+import com.example.mementoandroid.ui.album.parseAlbumUi
+import com.example.mementoandroid.ui.album.titleForHome
 import com.example.mementoandroid.ui.album.PhotoDetailScreen
 import com.example.mementoandroid.ui.album.getPhotoDetailMock
 import com.example.mementoandroid.ui.album.components.FriendPickerScreen
@@ -278,17 +280,7 @@ class MainActivity : ComponentActivity() {
                     BackendClient.getArray("/albums", t)
                         .onSuccess { arr ->
                             val list = (0 until arr.length()).map { i ->
-                                val o = arr.getJSONObject(i)
-                                val coverUrls = if (o.has("cover_image_urls")) {
-                                    val a = o.getJSONArray("cover_image_urls")
-                                    (0 until a.length()).map { j -> a.getString(j) }
-                                } else emptyList()
-                                AlbumUi(
-                                    id = o.getInt("id"),
-                                    name = o.getString("name"),
-                                    ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
-                                    coverImageUrls = coverUrls
-                                )
+                                arr.getJSONObject(i).parseAlbumUi()
                             }
                             withContext(Dispatchers.Main) { albums = list }
                             val currentUserId = AuthTokenStore.getUserId()
@@ -454,17 +446,7 @@ class MainActivity : ComponentActivity() {
                             BackendClient.getArray("/albums", t)
                                 .onSuccess { arr ->
                                     val list = (0 until arr.length()).map { i ->
-                                        val o = arr.getJSONObject(i)
-                                        val coverUrls = if (o.has("cover_image_urls")) {
-                                            val a = o.getJSONArray("cover_image_urls")
-                                            (0 until a.length()).map { j -> a.getString(j) }
-                                        } else emptyList()
-                                        AlbumUi(
-                                            id = o.getInt("id"),
-                                            name = o.getString("name"),
-                                            ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
-                                            coverImageUrls = coverUrls
-                                        )
+                                        arr.getJSONObject(i).parseAlbumUi()
                                     }
                                     withContext(Dispatchers.Main) { albums = list }
                                     val currentUserId = AuthTokenStore.getUserId()
@@ -747,7 +729,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.name }
+                val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.titleForHome() }
 
                 @OptIn(ExperimentalMaterial3Api::class)
                 Box(Modifier.fillMaxSize()) {
@@ -1005,7 +987,7 @@ class MainActivity : ComponentActivity() {
                                     photoDetailFromStandalone = true
                                     pendingStandalonePhotoDetail = null
                                 }
-                                val albumName = albums.find { it.id == aid }?.name ?: ""
+                                val albumName = albums.find { it.id == aid }?.titleForHome() ?: ""
                                 val albumOwnerId = albums.find { it.id == aid }?.ownerId
                                 val currentUserId = AuthTokenStore.getUserId()
                                 val canDeletePhoto = (currentUserId != null && albumOwnerId != null && currentUserId == albumOwnerId) ||
@@ -1312,17 +1294,7 @@ class MainActivity : ComponentActivity() {
                                                     BackendClient.getArray("/albums", t)
                                                         .onSuccess { arr ->
                                                             val list = (0 until arr.length()).map { i ->
-                                                                val o = arr.getJSONObject(i)
-                                                                val coverUrls = if (o.has("cover_image_urls")) {
-                                                                    val a = o.getJSONArray("cover_image_urls")
-                                                                    (0 until a.length()).map { j -> a.getString(j) }
-                                                                } else emptyList()
-                                                                AlbumUi(
-                                                                    id = o.getInt("id"),
-                                                                    name = o.getString("name"),
-                                                                    ownerId = if (o.has("owner_id")) o.getInt("owner_id") else null,
-                                                                    coverImageUrls = coverUrls
-                                                                )
+                                                                arr.getJSONObject(i).parseAlbumUi()
                                                             }
                                                             albums = list
                                                         }

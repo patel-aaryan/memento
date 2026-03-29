@@ -63,8 +63,9 @@ import coil.compose.AsyncImage
 import com.example.mementoandroid.util.orDefaultAvatar
 import com.example.mementoandroid.ui.album.AlbumUi
 import com.example.mementoandroid.ui.album.AlbumPhotoUi
+import com.example.mementoandroid.ui.album.standaloneMementoTitle
+import com.example.mementoandroid.ui.album.titleForHome
 import com.example.mementoandroid.ui.home.components.AlbumLogo
-import com.example.mementoandroid.util.formatPhotoMetadataLocation
 import com.example.mementoandroid.ui.home.components.SortAndFilterRow
 import com.example.mementoandroid.ui.home.components.HomeSort
 import com.example.mementoandroid.ui.home.components.HomeSortKind
@@ -77,12 +78,8 @@ sealed class HomeItem {
 }
 
 private fun HomeItem.displayTitle(): String = when (this) {
-    is HomeItem.StandalonePhoto -> {
-        val p = photo
-        if (p.latitude != null && p.longitude != null) formatPhotoMetadataLocation(p.latitude, p.longitude)
-        else "Unknown location"
-    }
-    is HomeItem.Album -> album.name
+    is HomeItem.StandalonePhoto -> photo.standaloneMementoTitle()
+    is HomeItem.Album -> album.titleForHome()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -336,7 +333,7 @@ fun HomeScreen(
                                         },
                                         headlineContent = {
                                             Text(
-                                                item.album.name,
+                                                item.album.titleForHome(),
                                                 color = MaterialTheme.colorScheme.onSurface,
                                             )
                                         },
@@ -538,7 +535,7 @@ private fun AlbumTile(
             fillWidth = true,
         )
         Text(
-            text = album.name,
+            text = album.titleForHome(),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
