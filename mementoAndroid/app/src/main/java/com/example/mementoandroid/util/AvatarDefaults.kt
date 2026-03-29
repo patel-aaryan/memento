@@ -3,7 +3,7 @@ package com.example.mementoandroid.util
 /**
  * Default placeholder image URL when a user has no profile picture.
  */
-const val DEFAULT_AVATAR_URL = "https://res.cloudinary.com/da8ac6bua/image/upload/v1773428617/137420f5b9c39bc911e472f5d20f053e_tnrwzj.jpg"
+const val DEFAULT_AVATAR_URL = "https://res.cloudinary.com/da8ac6bua/image/upload/v1774818134/pfp_x8ekxh.png"
 
 /**
  * Returns the profile picture URL, or the default placeholder if empty/null.
