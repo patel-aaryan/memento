@@ -32,6 +32,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +74,7 @@ import com.example.mementoandroid.ui.theme.MementoAndroidTheme
 import com.example.mementoandroid.util.AlbumSortStore
 import com.example.mementoandroid.util.AlbumViewStore
 import com.example.mementoandroid.util.AuthTokenStore
+import com.example.mementoandroid.util.clearCoilCaches
 import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.CloudinaryHelper
 import com.example.mementoandroid.util.PendingFriendTokenStore
@@ -198,6 +200,7 @@ class MainActivity : ComponentActivity() {
                 var albumSuggestionBusy by remember { mutableStateOf(false) }
                 /** False after first home feed load (albums + My Photos images) finishes or fails. */
                 var isHomeDataLoading by remember { mutableStateOf(true) }
+                var isPullRefreshing by remember { mutableStateOf(false) }
 
                 var showFriendPicker by remember { mutableStateOf(false) }
                 var pendingAlbumIdForFriend by remember { mutableStateOf<Int?>(null) }
@@ -210,37 +213,37 @@ class MainActivity : ComponentActivity() {
                     DeviceLocationHelper.getLastKnownOrNull(context)
 
 
-                fun loadAlbumSuggestion() {
-                    scope.launch {
-                        val t = AuthTokenStore.get() ?: return@launch
-                        withContext(Dispatchers.IO) {
-                            BackendClient.get("/album-suggestions/current", t)
-                                .onSuccess { j ->
-                                    val sugObj = j.optJSONObject("suggestion")
-                                    val ui = if (sugObj != null && sugObj.has("id")) {
-                                        val arr = sugObj.optJSONArray("preview_image_urls")
-                                        val previews = mutableListOf<String>()
-                                        if (arr != null) {
-                                            for (i in 0 until arr.length()) {
-                                                previews.add(arr.getString(i))
-                                            }
-                                        }
-                                        SuggestedAlbumUi(
-                                            id = sugObj.getInt("id"),
-                                            albumName = sugObj.optString("album_name", ""),
-                                            previewUrls = previews,
-                                            imageCount = sugObj.optInt("image_count", 0),
-                                        )
-                                    } else {
-                                        null
+                suspend fun loadAlbumSuggestionSuspend() {
+                    val t = AuthTokenStore.get() ?: return
+                    BackendClient.get("/album-suggestions/current", t)
+                        .onSuccess { j ->
+                            val sugObj = j.optJSONObject("suggestion")
+                            val ui = if (sugObj != null && sugObj.has("id")) {
+                                val arr = sugObj.optJSONArray("preview_image_urls")
+                                val previews = mutableListOf<String>()
+                                if (arr != null) {
+                                    for (i in 0 until arr.length()) {
+                                        previews.add(arr.getString(i))
                                     }
-                                    withContext(Dispatchers.Main) { albumSuggestion = ui }
                                 }
-                                .onFailure {
-                                    withContext(Dispatchers.Main) { albumSuggestion = null }
-                                }
+                                SuggestedAlbumUi(
+                                    id = sugObj.getInt("id"),
+                                    albumName = sugObj.optString("album_name", ""),
+                                    previewUrls = previews,
+                                    imageCount = sugObj.optInt("image_count", 0),
+                                )
+                            } else {
+                                null
+                            }
+                            withContext(Dispatchers.Main) { albumSuggestion = ui }
                         }
-                    }
+                        .onFailure {
+                            withContext(Dispatchers.Main) { albumSuggestion = null }
+                        }
+                }
+
+                fun loadAlbumSuggestion() {
+                    scope.launch { loadAlbumSuggestionSuspend() }
                 }
 
                 val profileLauncher = rememberLauncherForActivityResult(
@@ -439,25 +442,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                fun refreshHomeData() {
-                    scope.launch {
-                        val t = AuthTokenStore.get() ?: return@launch
-                        withContext(Dispatchers.IO) {
-                            BackendClient.getArray("/albums", t)
-                                .onSuccess { arr ->
-                                    val list = (0 until arr.length()).map { i ->
-                                        arr.getJSONObject(i).parseAlbumUi()
-                                    }
-                                    withContext(Dispatchers.Main) { albums = list }
-                                    val currentUserId = AuthTokenStore.getUserId()
-                                    val myPhotos = list.find { it.name == "My Photos" && it.ownerId == currentUserId }
-                                    if (myPhotos != null) {
-                                        BackendClient.getArray("/images/album/${myPhotos.id}", t)
-                                            .onSuccess { imgArr ->
-                                                val photoList = (0 until imgArr.length()).map { i ->
-                                                    val o = imgArr.getJSONObject(i)
-                                                    val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
-                                                    val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
+                suspend fun refreshHomeDataSuspend() {
+                    val t = AuthTokenStore.get() ?: return
+                    BackendClient.getArray("/albums", t)
+                        .onSuccess { arr ->
+                            val list = (0 until arr.length()).map { i ->
+                                arr.getJSONObject(i).parseAlbumUi()
+                            }
+                            withContext(Dispatchers.Main) { albums = list }
+                            val currentUserId = AuthTokenStore.getUserId()
+                            val myPhotos = list.find { it.name == "My Photos" && it.ownerId == currentUserId }
+                            if (myPhotos != null) {
+                                BackendClient.getArray("/images/album/${myPhotos.id}", t)
+                                    .onSuccess { imgArr ->
+                                        val photoList = (0 until imgArr.length()).map { i ->
+                                            val o = imgArr.getJSONObject(i)
+                                            val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
+                                            val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
                                             AlbumPhotoUi(
                                                 id = o.getInt("id").toString(),
                                                 imageUrl = o.getString("image_url"),
@@ -470,21 +471,92 @@ class MainActivity : ComponentActivity() {
                                                 takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
                                                 userId = if (o.has("user_id")) o.getInt("user_id") else null
                                             )
-                                                }
-                                                withContext(Dispatchers.Main) {
-                                                    standalonePhotos = photoList
-                                                    myPhotosAlbumId = myPhotos.id
-                                                }
-                                                loadAlbumSuggestion()
-                                            }
-                                    } else {
-                                        withContext(Dispatchers.Main) {
-                                            standalonePhotos = emptyList()
-                                            myPhotosAlbumId = null
                                         }
-                                        loadAlbumSuggestion()
+                                        withContext(Dispatchers.Main) {
+                                            standalonePhotos = photoList
+                                            myPhotosAlbumId = myPhotos.id
+                                        }
+                                        loadAlbumSuggestionSuspend()
                                     }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    standalonePhotos = emptyList()
+                                    myPhotosAlbumId = null
                                 }
+                                loadAlbumSuggestionSuspend()
+                            }
+                        }
+                }
+
+                fun refreshHomeData() {
+                    scope.launch { refreshHomeDataSuspend() }
+                }
+
+                suspend fun reloadAlbumContextSuspend(aid: Int) {
+                    val t = AuthTokenStore.get() ?: return
+                    BackendClient.getArray("/albums/$aid/members", t).onSuccess { membersArr ->
+                        val currentUserId = AuthTokenStore.getUserId()?.toString()
+                        val list = (0 until membersArr.length())
+                            .map { i ->
+                                val o = membersArr.getJSONObject(i)
+                                FriendUi(
+                                    id = o.getInt("id").toString(),
+                                    username = o.getString("name"),
+                                    profilePictureUrl = o.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                            .filter { it.id != currentUserId }
+                        withContext(Dispatchers.Main) { albumMembers = list }
+                    }.onFailure { withContext(Dispatchers.Main) { albumMembers = emptyList() } }
+
+                    BackendClient.getArray("/images/album/$aid", t).onSuccess { arr ->
+                        val list = (0 until arr.length()).map { i ->
+                            val o = arr.getJSONObject(i)
+                            val lat = if (o.isNull("latitude")) null else o.getDouble("latitude")
+                            val lon = if (o.isNull("longitude")) null else o.getDouble("longitude")
+                            AlbumPhotoUi(
+                                id = o.getInt("id").toString(),
+                                imageUrl = o.getString("image_url"),
+                                audioUrl = o.optString("audio_url", "").takeIf { it.isNotBlank() },
+                                caption = o.optString("caption", "").takeIf { it.isNotBlank() },
+                                latitude = lat,
+                                longitude = lon,
+                                locationName = o.optString("location_name", "").takeIf { it.isNotBlank() },
+                                dateAdded = o.optString("date_added", "").takeIf { it.isNotBlank() },
+                                takenAt = o.optString("taken_at", "").takeIf { it.isNotBlank() },
+                                userId = if (o.has("user_id")) o.getInt("user_id") else null
+                            )
+                        }
+                        withContext(Dispatchers.Main) {
+                            photos.clear()
+                            photos.addAll(list)
+                        }
+                    }.onFailure { e ->
+                        withContext(Dispatchers.Main) {
+                            handle401(context, e)
+                            photos.replaceWithAlbumGridSkeletons()
+                        }
+                    }
+                }
+
+                fun performPullRefresh() {
+                    if (isPullRefreshing) return
+                    scope.launch {
+                        isPullRefreshing = true
+                        try {
+                            withContext(Dispatchers.IO) { clearCoilCaches(context) }
+                            val t = AuthTokenStore.get()
+                            if (t == null) return@launch
+                            BackendClient.get("/auth/me", t)
+                                .onSuccess { j ->
+                                    val url = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                    withContext(Dispatchers.Main) { currentUserProfilePictureUrl = url }
+                                }
+                                .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                            refreshHomeDataSuspend()
+                            selectedAlbumId?.let { reloadAlbumContextSuspend(it) }
+                        } finally {
+                            withContext(Dispatchers.Main) { isPullRefreshing = false }
                         }
                     }
                 }
@@ -732,7 +804,12 @@ class MainActivity : ComponentActivity() {
                 val selectedAlbumName = selectedAlbumId?.let { id -> albums.find { it.id == id }?.titleForHome() }
 
                 @OptIn(ExperimentalMaterial3Api::class)
-                Box(Modifier.fillMaxSize()) {
+                PullToRefreshBox(
+                    isRefreshing = isPullRefreshing,
+                    onRefresh = ::performPullRefresh,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    Box(Modifier.fillMaxSize()) {
                     if (!cameraErrorMessage.isNullOrBlank()) {
                         AlertDialog(
                             onDismissRequest = { cameraErrorMessage = null },
@@ -1595,6 +1672,7 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.height(16.dp))
                             }
                         }
+                    }
                     }
                 }
             }

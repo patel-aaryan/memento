@@ -23,8 +23,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -48,6 +50,7 @@ import com.example.mementoandroid.api.getFcmToken
 import com.example.mementoandroid.ui.album.AddPhotoSource
 import com.example.mementoandroid.ui.album.components.AddPhotoBottomSheet
 import com.example.mementoandroid.util.AnniversaryNotificationsStore
+import com.example.mementoandroid.util.clearCoilCaches
 import com.example.mementoandroid.util.AuthTokenStore
 import com.example.mementoandroid.util.DarkModeStore
 import com.example.mementoandroid.util.orDefaultAvatar
@@ -119,6 +122,7 @@ class ProfileActivity : ComponentActivity() {
                 var addPhotoSheetOpen by remember { mutableStateOf(false) }
                 var pendingProfileFile by remember { mutableStateOf<File?>(null) }
                 var pendingProfileUri by remember { mutableStateOf<Uri?>(null) }
+                var isPullRefreshing by remember { mutableStateOf(false) }
                 val scope = rememberCoroutineScope()
 
                 fun refetchUser() {
@@ -170,6 +174,53 @@ class ProfileActivity : ComponentActivity() {
                                 }
                             }
                             .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                    }
+                }
+
+                suspend fun refetchAllProfileDataSuspend() {
+                    val t = AuthTokenStore.get() ?: return
+                    withContext(Dispatchers.IO) { clearCoilCaches(context) }
+                    BackendClient.get("/auth/me", t)
+                        .onSuccess { j ->
+                            withContext(Dispatchers.Main) {
+                                user = UserProfile(
+                                    name = j.optString("name", ""),
+                                    email = j.optString("email", ""),
+                                    profilePictureUrl = j.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                        }
+                        .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                    BackendClient.getArray("/friends", t)
+                        .onSuccess { arr ->
+                            val list = (0 until arr.length()).map { i ->
+                                val o = arr.getJSONObject(i)
+                                UserProfile(
+                                    name = o.optString("name", ""),
+                                    email = o.optString("email", ""),
+                                    profilePictureUrl = o.optString("profile_picture_url", "").takeIf { it.isNotBlank() }
+                                )
+                            }
+                            withContext(Dispatchers.Main) { friends = list }
+                        }
+                        .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                    BackendClient.getArray("/friends/requests/incoming", t)
+                        .onSuccess { arr ->
+                            val list = parseIncomingFriendRequests(arr)
+                            withContext(Dispatchers.Main) { incomingFriendRequests = list }
+                        }
+                        .onFailure { withContext(Dispatchers.Main) { handle401(context, it) } }
+                }
+
+                fun performProfilePullRefresh() {
+                    if (isPullRefreshing) return
+                    scope.launch {
+                        isPullRefreshing = true
+                        try {
+                            refetchAllProfileDataSuspend()
+                        } finally {
+                            withContext(Dispatchers.Main) { isPullRefreshing = false }
+                        }
                     }
                 }
 
@@ -455,23 +506,30 @@ class ProfileActivity : ComponentActivity() {
                     }
                 }
 
-                ProfileScreen(
-                    user = user,
-                    friends = friends,
-                    incomingFriendRequests = incomingFriendRequests,
-                    darkModeEnabled = darkMode,
-                    onDarkModeChange = { darkMode = it; DarkModeStore.set(applicationContext, it) },
-                    anniversaryNotificationsEnabled = anniversaryNotificationsEnabled,
-                    onAnniversaryNotificationsChange = { onAnniversaryNotificationsChange(it) },
-                    onBack = { finish() },
-                    onProfilePictureClick = { addPhotoSheetOpen = true },
-                    onSaveName = ::saveName,
-                    onGetFriendLink = ::getFriendLink,
-                    onAddFriendByEmail = ::addFriendByEmail,
-                    onAcceptFriendRequest = ::acceptFriendRequest,
-                    onDeclineFriendRequest = ::declineFriendRequest,
-                    onLogout = ::logout
-                )
+                @OptIn(ExperimentalMaterial3Api::class)
+                PullToRefreshBox(
+                    isRefreshing = isPullRefreshing,
+                    onRefresh = ::performProfilePullRefresh,
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    ProfileScreen(
+                        user = user,
+                        friends = friends,
+                        incomingFriendRequests = incomingFriendRequests,
+                        darkModeEnabled = darkMode,
+                        onDarkModeChange = { darkMode = it; DarkModeStore.set(applicationContext, it) },
+                        anniversaryNotificationsEnabled = anniversaryNotificationsEnabled,
+                        onAnniversaryNotificationsChange = { onAnniversaryNotificationsChange(it) },
+                        onBack = { finish() },
+                        onProfilePictureClick = { addPhotoSheetOpen = true },
+                        onSaveName = ::saveName,
+                        onGetFriendLink = ::getFriendLink,
+                        onAddFriendByEmail = ::addFriendByEmail,
+                        onAcceptFriendRequest = ::acceptFriendRequest,
+                        onDeclineFriendRequest = ::declineFriendRequest,
+                        onLogout = ::logout
+                    )
+                }
             }
         }
     }
